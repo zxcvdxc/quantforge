@@ -1,0 +1,12 @@
+# 全局依赖
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# 模块依赖 (开发时安装)
+# pip install -e modules/qf-data
+# pip install -e modules/qf-database
+# ...
