@@ -1,0 +1,265 @@
+# QuantForge 配置文件模板
+# 复制此文件为 config.yaml 并填写实际值
+
+# ==================== 数据库配置 ====================
+database:
+  mysql:
+    host: localhost
+    port: 3306
+    database: quantforge
+    username: quant
+    password: quant123
+    pool_size: 10
+    max_overflow: 20
+    pool_timeout: 30
+    
+  influxdb:
+    url: http://localhost:8086
+    token: "your-influxdb-token-here"  # 通过InfluxDB UI生成
+    org: quantforge
+    bucket: market_data
+    timeout: 10000
+    
+  redis:
+    host: localhost
+    port: 6379
+    db: 0
+    password: null
+    decode_responses: true
+
+# ==================== 交易所API配置 ====================
+exchanges:
+  # OKX (数字货币)
+  okx:
+    api_key: "your-okx-api-key"
+    api_secret: "your-okx-api-secret"
+    passphrase: "your-okx-passphrase"
+    server: "TEST"  # TEST 或 REAL
+    use_proxy: false
+    proxy:
+      http: "http://127.0.0.1:7890"
+      https: "http://127.0.0.1:7890"
+    
+  # Binance (数字货币)
+  binance:
+    api_key: "your-binance-api-key"
+    api_secret: "your-binance-api-secret"
+    testnet: true  # true=测试网, false=实盘
+    use_proxy: false
+    
+  # Tushare (A股)
+  tushare:
+    token: "your-tushare-token"
+    timeout: 30
+    
+  # AKShare (A股，备用)
+  akshare:
+    enabled: true
+    timeout: 30
+    
+  # CTP (期货)
+  ctp:
+    # SimNow仿真环境配置
+    broker_id: "9999"
+    user_id: "your-simnow-user-id"
+    password: "your-simnow-password"
+    td_address: "180.168.146.187:10101"
+    md_address: "180.168.146.187:10111"
+    
+    # 实盘配置（取消注释并修改）
+    # broker_id: "your-broker-id"
+    # user_id: "your-user-id"
+    # password: "your-password"
+    # td_address: "your-broker-td-address:port"
+    # md_address: "your-broker-md-address:port"
+
+# ==================== 资金配置 ====================
+portfolio:
+  # 总资金 (人民币)
+  total_capital: 1000000
+  
+  # 基础资金分配 (风险平价)
+  base_allocation:
+    a_share: 0.40    # A股 40%
+    futures: 0.35    # 期货 35%
+    crypto: 0.25     # 数字货币 25%
+  
+  # 配置限制
+  limits:
+    min_allocation: 0.10   # 单一品种最低10%
+    max_allocation: 0.50   # 单一品种最高50%
+    max_leverage: 1.5      # 最大杠杆1.5倍
+  
+  # 波动率目标
+  volatility_target: 0.15  # 15%年化波动率
+  
+  # 再平衡设置
+  rebalance:
+    frequency: "1M"        # 月度调整
+    threshold: 0.05        # 偏差超过5%触发调整
+    max_turnover: 0.20     # 单次最大换手率20%
+  
+  # 风险控制
+  risk_limits:
+    max_drawdown: 0.15          # 最大回撤15%
+    daily_loss_limit: 0.05      # 日亏损上限5%
+    monthly_loss_limit: 0.10    # 月亏损上限10%
+    max_position_per_symbol: 0.20  # 单品种最大20%
+    max_correlated_positions: 3     # 最大相关持仓3个
+
+# ==================== 策略配置 ====================
+strategies:
+  enabled:
+    - dual_ma
+    - basis_arbitrage
+    - calendar_spread
+    
+  dual_ma:
+    enabled: true
+    symbols: ["000001.SZ", "600519.SH", "BTC-USDT"]
+    params:
+      fast_window: 10
+      slow_window: 30
+    risk:
+      max_position: 0.10
+      stop_loss: 0.05
+      
+  basis_arbitrage:
+    enabled: true
+    symbols:
+      - ["BTC-USDT-SWAP", "BTC-USDT"]  # [期货, 现货]
+      - ["IF2506.CFFEX", "IF2509.CFFEX"]
+    params:
+      min_basis: 0.005      # 最小基差0.5%
+      max_holding_days: 7   # 最大持仓7天
+    risk:
+      max_position: 0.15
+      
+  calendar_spread:
+    enabled: true
+    symbols:
+      - ["IF2506.CFFEX", "IF2509.CFFEX"]
+      - ["RB2510.SHFE", "RB2505.SHFE"]
+    params:
+      threshold: 0.5
+      window: 20
+    risk:
+      max_position: 0.10
+
+# ==================== 交易执行配置 ====================
+execution:
+  # 滑点设置
+  slippage:
+    stock: 0.001      # A股 0.1%
+    future: 0.0005    # 期货 0.05%
+    crypto: 0.0002    # 数字货币 0.02%
+  
+  # 手续费
+  commission:
+    stock: 0.0003     # 万3
+    future: 0.0001    # 万1
+    crypto: 0.0005    # 万5
+  
+  # 订单设置
+  order:
+    timeout: 30       # 订单超时30秒
+    max_retry: 3      # 最大重试3次
+    partial_fill: true  # 允许部分成交
+    
+  # 智能路由
+  smart_routing:
+    enabled: true
+    min_order_size: 1000  # 最小拆分金额
+    max_splits: 5         # 最大拆单数
+
+# ==================== 回测配置 ====================
+backtest:
+  # 时间范围
+  start_date: "2020-01-01"
+  end_date: "2024-12-31"
+  
+  # 初始资金
+  initial_capital: 1000000
+  
+  # 费率
+  commission_rate: 0.0003
+  slippage: 0.001
+  
+  # 参数优化
+  optimization:
+    method: "grid_search"  # grid_search / random_search / bayesian
+    n_trials: 100
+    parallel: true
+    n_jobs: -1
+
+# ==================== 监控报警配置 ====================
+monitor:
+  # 监控间隔 (秒)
+  interval: 60
+  
+  # 报警方式
+  alerts:
+    email:
+      enabled: false
+      smtp_server: "smtp.gmail.com"
+      smtp_port: 587
+      username: "your-email@gmail.com"
+      password: "your-app-password"
+      to: ["alert@example.com"]
+      
+    wechat:
+      enabled: false
+      webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
+      
+    telegram:
+      enabled: false
+      bot_token: "your-bot-token"
+      chat_id: "your-chat-id"
+  
+  # 监控项
+  checks:
+    account_balance: true      # 账户余额
+    position_pnl: true         # 持仓盈亏
+    order_status: true         # 订单状态
+    strategy_health: true      # 策略健康
+    data_delay: true           # 数据延迟
+    system_resource: true      # 系统资源
+
+# ==================== 日志配置 ====================
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  handlers:
+    console:
+      enabled: true
+      level: INFO
+      
+    file:
+      enabled: true
+      level: DEBUG
+      filename: "logs/quantforge.log"
+      max_bytes: 10485760    # 10MB
+      backup_count: 5
+      
+    error_file:
+      enabled: true
+      level: ERROR
+      filename: "logs/error.log"
+      max_bytes: 10485760
+      backup_count: 10
+
+# ==================== 系统配置 ====================
+system:
+  # 时区
+  timezone: "Asia/Shanghai"
+  
+  # 性能
+  workers: 4           # 工作进程数
+  max_connections: 100 # 最大连接数
+  
+  # 缓存
+  cache:
+    enabled: true
+    ttl: 300           # 缓存5分钟
+    max_size: 10000    # 最大缓存条目

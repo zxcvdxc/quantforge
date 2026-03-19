@@ -1,0 +1,56 @@
+Metadata-Version: 2.4
+Name: qf-data
+Version: 0.1.0
+Summary: QuantForge Data Collection Module
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: requests>=2.31.0
+Requires-Dist: aiohttp>=3.8.0
+Requires-Dist: websockets>=11.0.0
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: numpy>=1.24.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: pytest-mock>=3.11.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: flake8>=6.0.0; extra == "dev"
+Requires-Dist: mypy>=1.5.0; extra == "dev"
+Requires-Dist: respx>=0.20.0; extra == "dev"
+Requires-Dist: aioresponses>=0.7.4; extra == "dev"
+
+# qf-data 数据采集模块
+
+## 功能
+多源数据接入、清洗、标准化处理
+
+## 支持数据源
+- A股: Tushare, AKShare
+- 期货: CTP行情
+- 数字货币: OKX, Binance
+
+## API接口
+```python
+from qf_data import DataCollector
+
+collector = DataCollector()
+data = collector.get_kline(symbol="BTC-USDT", interval="1m", limit=1000)
+```
+
+## 安装
+```bash
+pip install -e .
+```
+
+## 测试
+```bash
+pytest tests/ -v --cov=qf_data --cov-report=html
+```
+
+## 依赖
+- requests
+- aiohttp
+- websockets
+- pandas
+- numpy
