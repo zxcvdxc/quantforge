@@ -16,6 +16,11 @@ collector = DataCollector()
 data = collector.get_kline(symbol="BTC-USDT", interval="1m", limit=1000)
 ```
 
+## 安装
+```bash
+pip install -e .
+```
+
 ## 测试
 ```bash
 pytest tests/ -v --cov=qf_data --cov-report=html
@@ -25,3 +30,5 @@ pytest tests/ -v --cov=qf_data --cov-report=html
 - requests
 - aiohttp
 - websockets
+- pandas
+- numpy
