@@ -22,7 +22,10 @@ pytest tests/ -v --cov=qf_database
 ```
 
 ## 依赖
-- sqlalchemy
-- psycopg2-binary
-- influxdb-client
-- redis
+- sqlalchemy >= 2.0.0
+- pymysql
+- influxdb-client >= 1.36.0
+- redis >= 5.0.0
+- pytest
+- pytest-cov
+- pytest-asyncio
