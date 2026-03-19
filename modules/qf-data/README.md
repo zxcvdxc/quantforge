@@ -16,19 +16,162 @@ collector = DataCollector()
 data = collector.get_kline(symbol="BTC-USDT", interval="1m", limit=1000)
 ```
 
-## 安装
+## 🧪 测试使用指南
+
+### 运行所有测试
 ```bash
-pip install -e .
+# 进入模块目录
+cd modules/qf-data
+
+# 运行所有测试
+pytest tests/ -v
+
+# 带覆盖率报告
+pytest tests/ -v --cov=src --cov-report=html
+
+# 并行运行测试（加速）
+pytest tests/ -v -n auto
 ```
 
-## 测试
+### 运行特定测试类
 ```bash
-pytest tests/ -v --cov=qf_data --cov-report=html
+# 测试数据采集器
+pytest tests/test_collector.py::TestDataCollector -v
+
+# 测试数据清洗
+pytest tests/test_collector.py::TestDataCleaner -v
+
+# 测试特定数据源
+pytest tests/test_collector.py::TestDataCollector::test_get_kline -v
+```
+
+### 运行特定测试用例
+```bash
+# 测试初始化
+pytest tests/test_collector.py::TestDataCollector::test_init -v
+
+# 测试K线获取
+pytest tests/test_collector.py::TestDataCollector::test_get_kline -v
+
+# 测试Tick获取
+pytest tests/test_collector.py::TestDataCollector::test_get_tick -v
+
+# 测试数据格式
+pytest tests/test_collector.py::TestDataCollector::test_data_format -v
+
+# 测试缺失值处理
+pytest tests/test_collector.py::TestDataCleaner::test_remove_missing -v
+
+# 测试异常值过滤
+pytest tests/test_collector.py::TestDataCleaner::test_remove_outliers -v
+```
+
+### 测试覆盖率检查
+```bash
+# 终端显示覆盖率
+pytest tests/ -v --cov=src --cov-report=term-missing
+
+# 生成HTML报告
+pytest tests/ -v --cov=src --cov-report=html
+
+# 生成XML报告（CI/CD）
+pytest tests/ --cov=src --cov-report=xml
+
+# 强制覆盖率必须>80%
+pytest tests/ --cov=src --cov-fail-under=80
+```
+
+### 调试测试
+```bash
+# 失败时进入PDB调试
+pytest tests/ -v --pdb
+
+# 只运行上次失败的测试
+pytest tests/ -v --lf
+
+# 显示最慢的10个测试
+pytest tests/ -v --durations=10
+
+# 显示print输出
+pytest tests/ -v -s
+```
+
+### 测试特定数据源
+```bash
+# 测试OKX接口（需要API密钥）
+export OKX_API_KEY=your-key
+export OKX_API_SECRET=your-secret
+pytest tests/test_collector.py -k okx -v
+
+# 测试Binance接口
+export BINANCE_API_KEY=your-key
+export BINANCE_API_SECRET=your-secret
+pytest tests/test_collector.py -k binance -v
+
+# 测试A股接口
+pytest tests/test_collector.py -k stock -v
+
+# 跳过需要API的测试
+pytest tests/ -v -m "not api_required"
+```
+
+### 测试输出示例
+```
+============================= test session starts =============================
+platform darwin -- Python 3.10.0, pytest-7.4.0, pluggy-1.0.0
+rootdir: /path/to/quantforge-modules/modules/qf-data
+plugins: cov-4.1.0, asyncio-0.21.0
+collected 47 items
+
+tests/test_collector.py::TestDataCollector::test_init PASSED              [  2%]
+tests/test_collector.py::TestDataCollector::test_get_kline PASSED          [  4%]
+tests/test_collector.py::TestDataCollector::test_get_tick PASSED           [  6%]
+...
+tests/test_collector.py::TestDataCleaner::test_remove_outliers PASSED     [100%]
+
+============================= 47 passed in 5.32s =============================
+```
+
+## 测试结构
+```
+tests/
+└── test_collector.py     # 47个测试用例
+    ├── TestDataCollector    # 采集器测试
+    │   ├── test_init
+    │   ├── test_get_kline
+    │   ├── test_get_tick
+    │   └── test_data_format
+    └── TestDataCleaner      # 清洗器测试
+        ├── test_remove_missing
+        └── test_remove_outliers
+```
+
+## 源代码结构
+```
+src/qf_data/
+├── __init__.py           # 模块导出
+├── types.py              # 数据类型定义
+├── exceptions.py         # 异常类
+├── base.py               # 数据源基类
+├── collector.py          # 主采集器
+├── cleaner.py            # 数据清洗
+└── exchanges/            # 交易所实现
+    ├── okx.py            # OKX API
+    ├── binance.py        # Binance API
+    ├── cnstock.py        # A股接口
+    └── ctp.py            # 期货CTP接口
 ```
 
 ## 依赖
-- requests
-- aiohttp
-- websockets
-- pandas
-- numpy
+```bash
+pip install -r requirements.txt
+# 或
+pip install requests aiohttp websockets pandas numpy
+pip install pytest pytest-cov pytest-asyncio
+```
+
+## 示例使用
+```bash
+# 运行示例
+python3 examples/basic_usage.py
+```
