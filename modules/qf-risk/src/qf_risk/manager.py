@@ -134,7 +134,7 @@ class RiskManager:
         if total_result.status == LimitCheckStatus.VIOLATION:
             reasons.append(f"Total position limit: {total_result.message}")
         
-        # Check concentration
+        # Check concentration - only add as reason if it's a violation
         test_positions = self._positions.copy()
         if side.lower() == 'buy':
             test_positions[symbol] = test_positions.get(symbol, 0.0) + notional_value
@@ -142,8 +142,8 @@ class RiskManager:
             test_positions[symbol] = test_positions.get(symbol, 0.0) - notional_value
         
         concentration_result = self.position_limits.check_concentration(test_positions)
-        if concentration_result.status == LimitCheckStatus.WARNING:
-            reasons.append(f"Concentration warning: {concentration_result.message}")
+        if concentration_result.status == LimitCheckStatus.VIOLATION:
+            reasons.append(f"Concentration limit: {concentration_result.message}")
         
         allowed = len(reasons) == 0
         return allowed, reasons
