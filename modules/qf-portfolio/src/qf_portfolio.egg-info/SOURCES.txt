@@ -1,0 +1,14 @@
+README.md
+pyproject.toml
+src/qf_portfolio/__init__.py
+src/qf_portfolio/allocator.py
+src/qf_portfolio/kelly.py
+src/qf_portfolio/ml_weights.py
+src/qf_portfolio/risk_parity.py
+src/qf_portfolio/volatility_target.py
+src/qf_portfolio.egg-info/PKG-INFO
+src/qf_portfolio.egg-info/SOURCES.txt
+src/qf_portfolio.egg-info/dependency_links.txt
+src/qf_portfolio.egg-info/requires.txt
+src/qf_portfolio.egg-info/top_level.txt
+tests/test_portfolio.py
