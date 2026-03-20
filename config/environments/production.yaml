@@ -1,0 +1,380 @@
+# ============================================================
+# QuantForge 生产环境配置
+# ============================================================
+
+# 应用配置
+app:
+  name: "QuantForge"
+  version: "0.2.0"
+  environment: "production"
+  debug: false
+  log_level: "INFO"
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  reload: false
+  timeout: 60
+  keep_alive: 5
+  
+# 性能配置
+performance:
+  max_connections: 1000
+  connection_timeout: 30
+  request_timeout: 30
+  max_request_body_size: 10485760  # 10MB
+  enable_compression: true
+  compression_level: 6
+
+# 数据库配置 (生产环境使用连接池和SSL)
+database:
+  mysql:
+    host: "${MYSQL_HOST:qf-mysql}"
+    port: 3306
+    database: "${MYSQL_DATABASE:quantforge}"
+    username: "${MYSQL_USER:}"
+    password: "${MYSQL_PASSWORD:}"
+    pool_size: 20
+    max_overflow: 40
+    pool_timeout: 30
+    pool_recycle: 3600
+    pool_pre_ping: true
+    echo: false
+    ssl_mode: "REQUIRED"
+    ssl_ca: "/etc/ssl/certs/ca-certificates.crt"
+    
+  influxdb:
+    url: "${INFLUXDB_URL:http://qf-influxdb:8086}"
+    token: "${INFLUXDB_TOKEN:}"
+    org: "quantforge"
+    bucket: "market_data"
+    timeout: 30000
+    batch_size: 1000
+    flush_interval: 10
+    
+  redis:
+    host: "${REDIS_HOST:qf-redis}"
+    port: 6379
+    db: 0
+    password: "${REDIS_PASSWORD:}"
+    decode_responses: true
+    socket_timeout: 5
+    socket_connect_timeout: 5
+    max_connections: 50
+    health_check_interval: 30
+
+# 连接池配置
+connection_pools:
+  mysql:
+    min_size: 5
+    max_size: 20
+    max_idle_time: 300
+    max_lifetime: 3600
+  
+  redis:
+    min_size: 2
+    max_size: 10
+    max_idle_time: 300
+
+# 交易所API配置 (生产环境使用实盘)
+exchanges:
+  okx:
+    api_key: "${OKX_API_KEY:}"
+    api_secret: "${OKX_API_SECRET:}"
+    passphrase: "${OKX_PASSPHRASE:}"
+    server: "${OKX_SERVER:REAL}"
+    use_proxy: ${OKX_USE_PROXY:false}
+    proxy:
+      http: "${OKX_PROXY_HTTP:}"
+      https: "${OKX_PROXY_HTTPS:}"
+    rate_limit:
+      requests_per_second: 20
+      burst_size: 100
+      
+  binance:
+    api_key: "${BINANCE_API_KEY:}"
+    api_secret: "${BINANCE_API_SECRET:}"
+    testnet: ${BINANCE_TESTNET:false}
+    use_proxy: ${BINANCE_USE_PROXY:false}
+    rate_limit:
+      requests_per_second: 10
+      burst_size: 50
+      
+  tushare:
+    token: "${TUSHARE_TOKEN:}"
+    timeout: 30
+    rate_limit:
+      requests_per_minute: 500
+      
+  akshare:
+    enabled: ${AKSHARE_ENABLED:true}
+    timeout: 30
+    
+  ctp:
+    broker_id: "${CTP_BROKER_ID:}"
+    user_id: "${CTP_USER_ID:}"
+    password: "${CTP_PASSWORD:}"
+    td_address: "${CTP_TD_ADDRESS:}"
+    md_address: "${CTP_MD_ADDRESS:}"
+
+# 资金配置
+portfolio:
+  total_capital: ${TOTAL_CAPITAL:1000000}
+  
+  base_allocation:
+    a_share: 0.40
+    futures: 0.35
+    crypto: 0.25
+  
+  limits:
+    min_allocation: 0.10
+    max_allocation: 0.50
+    max_leverage: 1.5
+  
+  volatility_target: 0.15
+  
+  rebalance:
+    frequency: "1M"
+    threshold: 0.05
+    max_turnover: 0.20
+  
+  risk_limits:
+    max_drawdown: 0.15
+    daily_loss_limit: 0.05
+    monthly_loss_limit: 0.10
+    max_position_per_symbol: 0.20
+    max_correlated_positions: 3
+
+# 策略配置
+strategies:
+  enabled:
+    - dual_ma
+    - basis_arbitrage
+    - calendar_spread
+    
+  dual_ma:
+    enabled: ${STRATEGY_DUAL_MA_ENABLED:true}
+    symbols:
+      - "000001.SZ"
+      - "600519.SH"
+      - "BTC-USDT"
+      - "ETH-USDT"
+    params:
+      fast_window: 10
+      slow_window: 30
+    risk:
+      max_position: 0.10
+      stop_loss: 0.05
+      
+  basis_arbitrage:
+    enabled: ${STRATEGY_BASIS_ENABLED:true}
+    symbols:
+      - ["BTC-USDT-SWAP", "BTC-USDT"]
+      - ["IF2506.CFFEX", "IF2509.CFFEX"]
+    params:
+      min_basis: 0.005
+      max_holding_days: 7
+    risk:
+      max_position: 0.15
+      
+  calendar_spread:
+    enabled: ${STRATEGY_CALENDAR_ENABLED:true}
+    symbols:
+      - ["IF2506.CFFEX", "IF2509.CFFEX"]
+      - ["RB2510.SHFE", "RB2505.SHFE"]
+    params:
+      threshold: 0.5
+      window: 20
+    risk:
+      max_position: 0.10
+
+# 执行配置
+execution:
+  dry_run: ${EXECUTION_DRY_RUN:false}
+  
+  slippage:
+    stock: 0.001
+    future: 0.0005
+    crypto: 0.0002
+  
+  commission:
+    stock: 0.0003
+    future: 0.0001
+    crypto: 0.0005
+  
+  order:
+    timeout: 30
+    max_retry: 3
+    partial_fill: true
+    max_orders_per_second: 100
+    
+  smart_routing:
+    enabled: true
+    min_order_size: 1000
+    max_splits: 5
+    
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    recovery_timeout: 60
+    half_open_max_calls: 3
+
+# 回测配置
+backtest:
+  start_date: "${BACKTEST_START:2020-01-01}"
+  end_date: "${BACKTEST_END:2024-12-31}"
+  initial_capital: 1000000
+  commission_rate: 0.0003
+  slippage: 0.001
+  
+  optimization:
+    method: "bayesian"
+    n_trials: 200
+    parallel: true
+    n_jobs: -1
+
+# 监控报警配置
+monitor:
+  enabled: true
+  interval: 60
+  
+  alerts:
+    email:
+      enabled: ${ALERT_EMAIL_ENABLED:false}
+      smtp_server: "${SMTP_SERVER:smtp.gmail.com}"
+      smtp_port: ${SMTP_PORT:587}
+      username: "${SMTP_USERNAME:}"
+      password: "${SMTP_PASSWORD:}"
+      to:
+        - "${ALERT_EMAIL_TO:}"
+      
+    wechat:
+      enabled: ${ALERT_WECHAT_ENABLED:false}
+      webhook_url: "${WECHAT_WEBHOOK_URL:}"
+      
+    telegram:
+      enabled: ${ALERT_TELEGRAM_ENABLED:false}
+      bot_token: "${TELEGRAM_BOT_TOKEN:}"
+      chat_id: "${TELEGRAM_CHAT_ID:}"
+      
+    pagerduty:
+      enabled: ${ALERT_PAGERDUTY_ENABLED:false}
+      service_key: "${PAGERDUTY_SERVICE_KEY:}"
+  
+  checks:
+    account_balance: true
+    position_pnl: true
+    order_status: true
+    strategy_health: true
+    data_delay: true
+    system_resource: true
+    
+  thresholds:
+    cpu_warning: 70
+    cpu_critical: 90
+    memory_warning: 80
+    memory_critical: 95
+    latency_warning: 100
+    latency_critical: 500
+    error_rate_warning: 0.01
+    error_rate_critical: 0.05
+
+# 日志配置
+logging:
+  level: "${LOG_LEVEL:INFO}"
+  format: "%(asctime)s - %(name)s - %(levelname)s - [%(request_id)s] - %(message)s"
+  
+  handlers:
+    console:
+      enabled: ${LOG_CONSOLE_ENABLED:true}
+      level: "INFO"
+      
+    file:
+      enabled: ${LOG_FILE_ENABLED:true}
+      level: "DEBUG"
+      filename: "${LOG_FILE_PATH:/app/logs/quantforge.log}"
+      max_bytes: 104857600    # 100MB
+      backup_count: 10
+      
+    error_file:
+      enabled: ${LOG_ERROR_ENABLED:true}
+      level: "ERROR"
+      filename: "${LOG_ERROR_PATH:/app/logs/error.log}"
+      max_bytes: 104857600
+      backup_count: 20
+      
+    json_file:
+      enabled: ${LOG_JSON_ENABLED:true}
+      level: "INFO"
+      filename: "${LOG_JSON_PATH:/app/logs/quantforge.json.log}"
+      max_bytes: 104857600
+      backup_count: 10
+      
+    syslog:
+      enabled: ${LOG_SYSLOG_ENABLED:false}
+      host: "${SYSLOG_HOST:}"
+      port: ${SYSLOG_PORT:514}
+
+# 分布式追踪
+tracing:
+  enabled: ${TRACING_ENABLED:true}
+  service_name: "quantforge"
+  jaeger:
+    host: "${JAEGER_HOST:}"
+    port: ${JAEGER_PORT:6831}
+    sampler_type: "probabilistic"
+    sampler_param: 0.1
+
+# 指标收集
+metrics:
+  enabled: ${METRICS_ENABLED:true}
+  prometheus:
+    enabled: true
+    port: 8000
+    path: "/metrics"
+  
+  custom_metrics:
+    - name: "order_latency"
+      type: "histogram"
+      labels: ["symbol", "side"]
+    - name: "active_positions"
+      type: "gauge"
+      labels: ["symbol"]
+    - name: "strategy_pnl"
+      type: "counter"
+      labels: ["strategy", "symbol"]
+
+# 特性开关
+features:
+  enable_real_trading: ${FEATURE_REAL_TRADING:true}
+  enable_notifications: ${FEATURE_NOTIFICATIONS:true}
+  enable_auto_rebalance: ${FEATURE_AUTO_REBALANCE:true}
+  enable_ml_models: ${FEATURE_ML_MODELS:false}
+  enable_streaming_data: ${FEATURE_STREAMING:true}
+  enable_batch_processing: ${FEATURE_BATCH:true}
+  cache_enabled: true
+  hot_reload: false
+  detailed_logging: ${FEATURE_DETAILED_LOG:false}
+  
+# 安全配置
+security:
+  jwt_secret: "${JWT_SECRET:}"
+  jwt_expiry_hours: ${JWT_EXPIRY_HOURS:24}
+  rate_limit_requests: ${RATE_LIMIT_REQUESTS:1000}
+  rate_limit_window: ${RATE_LIMIT_WINDOW:60}
+  allowed_hosts:
+    - "${ALLOWED_HOST:}"
+  cors_origins:
+    - "${CORS_ORIGIN:}"
+  
+  ssl:
+    enabled: ${SSL_ENABLED:true}
+    cert_path: "${SSL_CERT_PATH:}"
+    key_path: "${SSL_KEY_PATH:}"
+    
+  encryption:
+    at_rest: true
+    in_transit: true
+    key_rotation_days: 90

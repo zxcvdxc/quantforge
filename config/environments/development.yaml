@@ -1,0 +1,138 @@
+# ============================================================
+# QuantForge 开发环境配置
+# ============================================================
+
+# 应用配置
+app:
+  name: "QuantForge"
+  version: "0.2.0"
+  environment: "development"
+  debug: true
+  log_level: "DEBUG"
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 2
+  reload: true
+  timeout: 30
+
+# 数据库配置 (开发环境使用本地连接)
+database:
+  mysql:
+    host: "localhost"
+    port: 3306
+    database: "quantforge_dev"
+    username: "${MYSQL_USER:dev_user}"
+    password: "${MYSQL_PASSWORD:dev_password}"
+    pool_size: 5
+    max_overflow: 10
+    pool_timeout: 30
+    echo: true  # 开发环境打印SQL
+    
+  influxdb:
+    url: "http://localhost:8086"
+    token: "${INFLUXDB_TOKEN:dev-token}"
+    org: "quantforge"
+    bucket: "market_data_dev"
+    timeout: 10000
+    
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+    password: null
+    decode_responses: true
+
+# 交易所API配置 (开发环境使用测试网)
+exchanges:
+  okx:
+    api_key: "${OKX_API_KEY:}"
+    api_secret: "${OKX_API_SECRET:}"
+    passphrase: "${OKX_PASSPHRASE:}"
+    server: "TEST"  # 开发环境使用测试网
+    use_proxy: false
+    
+  binance:
+    api_key: "${BINANCE_API_KEY:}"
+    api_secret: "${BINANCE_API_SECRET:}"
+    testnet: true
+    use_proxy: false
+    
+  tushare:
+    token: "${TUSHARE_TOKEN:}"
+    timeout: 30
+    
+  akshare:
+    enabled: true
+    timeout: 30
+
+# 策略配置 (开发环境启用所有策略用于测试)
+strategies:
+  enabled:
+    - dual_ma
+    - basis_arbitrage
+    - calendar_spread
+    
+  dual_ma:
+    enabled: true
+    symbols: ["BTC-USDT", "ETH-USDT"]
+    params:
+      fast_window: 5  # 开发环境使用较短周期
+      slow_window: 10
+    risk:
+      max_position: 0.05
+      stop_loss: 0.02
+      
+  basis_arbitrage:
+    enabled: false  # 开发环境禁用复杂策略
+    
+  calendar_spread:
+    enabled: false
+
+# 执行配置
+execution:
+  dry_run: true  # 开发环境默认模拟执行
+  slippage:
+    stock: 0.001
+    future: 0.0005
+    crypto: 0.0002
+  commission:
+    stock: 0.0003
+    future: 0.0001
+    crypto: 0.0005
+
+# 回测配置
+backtest:
+  start_date: "2024-01-01"
+  end_date: "2024-12-31"
+  initial_capital: 100000
+  commission_rate: 0.0003
+  slippage: 0.001
+
+# 监控配置
+monitor:
+  enabled: false  # 开发环境禁用监控告警
+  interval: 60
+  
+# 特性开关
+features:
+  enable_real_trading: false
+  enable_notifications: false
+  enable_auto_rebalance: false
+  enable_ml_models: false
+  cache_enabled: true
+  hot_reload: true
+  detailed_logging: true
+
+# 安全配置
+security:
+  jwt_secret: "${JWT_SECRET:dev-secret-key}"
+  jwt_expiry_hours: 24
+  rate_limit_requests: 1000
+  rate_limit_window: 60
+  allowed_hosts:
+    - "localhost"
+    - "127.0.0.1"
+    - "*.local"

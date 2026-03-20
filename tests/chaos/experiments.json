@@ -1,0 +1,115 @@
+{
+  "version": "1.0.0",
+  "title": "QuantForge Chaos Experiments",
+  "description": "混沌工程实验定义",
+  "experiments": [
+    {
+      "title": "网络延迟注入测试",
+      "description": "测试系统在网络延迟下的表现",
+      "steady-state-hypothesis": {
+        "title": "服务健康检查",
+        "probes": [
+          {
+            "type": "probe",
+            "name": "qf-data-health",
+            "tolerance": {"type": "regex", "pattern": "healthy", "expect": "healthy"},
+            "provider": {
+              "type": "http",
+              "url": "http://qf-data:8000/health",
+              "timeout": 5
+            }
+          }
+        ]
+      },
+      "method": [
+        {
+          "type": "action",
+          "name": "inject-latency",
+          "provider": {
+            "type": "process",
+            "path": "python3",
+            "arguments": "tests/chaos/chaos_monkey.py"
+          }
+        }
+      ],
+      "rollbacks": [
+        {
+          "type": "action",
+          "name": "cleanup-network",
+          "provider": {
+            "type": "process",
+            "path": "docker",
+            "arguments": ["exec", "qf-data", "tc", "qdisc", "del", "dev", "eth0", "root"]
+          }
+        }
+      ]
+    },
+    {
+      "title": "数据库故障恢复测试",
+      "description": "测试数据库故障时系统的容错能力",
+      "steady-state-hypothesis": {
+        "title": "数据库连接正常",
+        "probes": [
+          {
+            "type": "probe",
+            "name": "mysql-alive",
+            "tolerance": 0,
+            "provider": {
+              "type": "process",
+              "path": "docker",
+              "arguments": ["exec", "qf-mysql", "mysqladmin", "ping"]
+            }
+          }
+        ]
+      },
+      "method": [
+        {
+          "type": "action",
+          "name": "restart-database",
+          "provider": {
+            "type": "process",
+            "path": "docker",
+            "arguments": ["restart", "qf-mysql"]
+          },
+          "pauses": {
+            "after": 30
+          }
+        }
+      ]
+    },
+    {
+      "title": "服务随机Kill测试",
+      "description": "模拟容器随机崩溃场景",
+      "steady-state-hypothesis": {
+        "title": "所有服务正常运行",
+        "probes": [
+          {
+            "type": "probe",
+            "name": "all-services-up",
+            "tolerance": 0,
+            "provider": {
+              "type": "process",
+              "path": "docker",
+              "arguments": ["ps", "--filter", "name=qf-", "--format", "{{.Names}}"]
+            }
+          }
+        ]
+      },
+      "method": [
+        {
+          "type": "action",
+          "name": "random-kill",
+          "provider": {
+            "type": "python",
+            "module": "chaos_monkey",
+            "func": "random_service_kill",
+            "arguments": {
+              "services": ["qf-data", "qf-strategy", "qf-execution"],
+              "count": 1
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

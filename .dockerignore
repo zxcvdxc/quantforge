@@ -1,0 +1,104 @@
+# ============================================================
+# QuantForge .dockerignore
+# 优化构建上下文大小
+# ============================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+**/venv/
+**/env/
+**/.venv/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# 日志和临时文件
+logs/
+*.log
+tmp/
+temp/
+*.tmp
+
+# 数据文件（大数据量）
+data/
+*.csv
+*.parquet
+*.db
+*.sqlite
+
+# 测试相关（生产不需要）
+tests/
+test-results/
+.pytest_cache/
+
+# 文档
+docs/
+*.md
+!README.md
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+azure-pipelines.yml
+
+# 配置文件（敏感信息）
+config/config.yaml
+config/secrets.yaml
+.env
+.env.*
+
+# 备份文件
+*.bak
+*.backup
+
+# 前端构建产物（如果使用）
+node_modules/
+frontend/dist/
+frontend/build/
+
+# 缓存
+.cache/
+mypy_cache/
+.dmypy.json

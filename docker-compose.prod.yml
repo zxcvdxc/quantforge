@@ -1,0 +1,460 @@
+# ============================================================
+# QuantForge 生产环境 Docker Compose
+# 包含: 高可用配置 | 资源限制 | 健康检查 | 日志轮转
+# ============================================================
+
+version: '3.8'
+
+x-default-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "100m"
+    max-file: "5"
+    labels: "service_name,environment"
+
+x-default-restart: &default-restart
+  restart: unless-stopped
+
+services:
+  # ==================== 数据库服务 ====================
+  mysql:
+    image: mysql:8.0.35
+    container_name: qf-mysql
+    <<: *default-restart
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      MYSQL_DATABASE: quantforge
+      MYSQL_USER: quant
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_password
+      TZ: Asia/Shanghai
+    secrets:
+      - mysql_root_password
+      - mysql_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./config/mysql/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+    networks:
+      - qf-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging: *default-logging
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: qf-influxdb
+    <<: *default-restart
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME_FILE: /run/secrets/influxdb_user
+      DOCKER_INFLUXDB_INIT_PASSWORD_FILE: /run/secrets/influxdb_password
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN_FILE: /run/secrets/influxdb_token
+      DOCKER_INFLUXDB_INIT_ORG: quantforge
+      DOCKER_INFLUXDB_INIT_BUCKET: market_data
+      DOCKER_INFLUXDB_INIT_RETENTION: 30d
+      TZ: Asia/Shanghai
+    secrets:
+      - influxdb_user
+      - influxdb_password
+      - influxdb_token
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - ./config/influxdb/influxdb.conf:/etc/influxdb2/influxdb.conf:ro
+    networks:
+      - qf-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    container_name: qf-redis
+    <<: *default-restart
+    command: redis-server /usr/local/etc/redis/redis.conf
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./config/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - qf-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging: *default-logging
+
+  # ==================== 监控服务 ====================
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: qf-grafana
+    <<: *default-restart
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD_FILE: /run/secrets/grafana_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_SECURITY_ANGULAR_SUPPORT_ENABLED: "false"
+      TZ: Asia/Shanghai
+    secrets:
+      - grafana_password
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - qf-network
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:v2.48.1
+    container_name: qf-prometheus
+    <<: *default-restart
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.min-block-duration=2h'
+      - '--storage.tsdb.max-block-duration=2h'
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    networks:
+      - qf-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+        reservations:
+          cpus: '0.1'
+          memory: 256M
+    logging: *default-logging
+
+  # ==================== QuantForge 核心服务 ====================
+  qf-data:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: qf-data
+    <<: *default-restart
+    environment:
+      - CONFIG_PATH=/app/config/config.yaml
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - TZ=Asia/Shanghai
+      - PROMETHEUS_PORT=8000
+      - SERVICE_NAME=qf-data
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config:ro
+      - data_volume:/app/data
+      - logs_volume:/app/logs
+    networks:
+      - qf-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging: *default-logging
+
+  qf-strategy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: qf-strategy
+    <<: *default-restart
+    environment:
+      - CONFIG_PATH=/app/config/config.yaml
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - TZ=Asia/Shanghai
+      - PROMETHEUS_PORT=8001
+      - SERVICE_NAME=qf-strategy
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./config:/app/config:ro
+      - data_volume:/app/data
+      - logs_volume:/app/logs
+    networks:
+      - qf-network
+    depends_on:
+      - qf-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    logging: *default-logging
+
+  qf-execution:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: qf-execution
+    <<: *default-restart
+    environment:
+      - CONFIG_PATH=/app/config/config.yaml
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - TZ=Asia/Shanghai
+      - PROMETHEUS_PORT=8002
+      - SERVICE_NAME=qf-execution
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./config:/app/config:ro
+      - data_volume:/app/data
+      - logs_volume:/app/logs
+    networks:
+      - qf-network
+    depends_on:
+      - qf-strategy
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    logging: *default-logging
+
+  qf-risk:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: qf-risk
+    <<: *default-restart
+    environment:
+      - CONFIG_PATH=/app/config/config.yaml
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - TZ=Asia/Shanghai
+      - PROMETHEUS_PORT=8003
+      - SERVICE_NAME=qf-risk
+    ports:
+      - "8003:8000"
+    volumes:
+      - ./config:/app/config:ro
+      - data_volume:/app/data
+      - logs_volume:/app/logs
+    networks:
+      - qf-network
+    depends_on:
+      - qf-execution
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+        reservations:
+          cpus: '0.1'
+          memory: 256M
+    logging: *default-logging
+
+  # ==================== 混沌测试服务 ====================
+  chaos-monkey:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: chaos-test
+    container_name: qf-chaos-monkey
+    profiles: ["chaos"]
+    environment:
+      - CHAOS_INTERVAL=300
+      - CHAOS_DURATION=60
+      - TARGET_SERVICES=qf-data,qf-strategy,qf-execution
+      - TZ=Asia/Shanghai
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./tests/chaos:/app/tests/chaos:ro
+    networks:
+      - qf-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    logging: *default-logging
+
+  # ==================== 压力测试服务 ====================
+  stress-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: stress-test
+    container_name: qf-stress-test
+    profiles: ["stress"]
+    environment:
+      - TARGET_HOST=qf-data
+      - TARGET_PORT=8000
+      - DURATION=3600
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./tests/stress:/app/tests/stress:ro
+      - stress_results:/app/results
+    networks:
+      - qf-network
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+    logging: *default-logging
+
+# ==================== 网络配置 ====================
+networks:
+  qf-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ==================== 卷配置 ====================
+volumes:
+  mysql_data:
+    driver: local
+  influxdb_data:
+    driver: local
+  redis_data:
+    driver: local
+  grafana_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  data_volume:
+    driver: local
+  logs_volume:
+    driver: local
+  stress_results:
+    driver: local
+
+# ==================== 密钥配置 ====================
+secrets:
+  mysql_root_password:
+    file: ./secrets/mysql_root_password.txt
+  mysql_password:
+    file: ./secrets/mysql_password.txt
+  influxdb_user:
+    file: ./secrets/influxdb_user.txt
+  influxdb_password:
+    file: ./secrets/influxdb_password.txt
+  influxdb_token:
+    file: ./secrets/influxdb_token.txt
+  grafana_password:
+    file: ./secrets/grafana_password.txt
