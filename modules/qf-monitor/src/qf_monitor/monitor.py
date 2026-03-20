@@ -137,7 +137,7 @@ class Monitor:
                 try:
                     callback(result)
                 except Exception as e:
-                    logger.error(f"callback_error", event=event, error=str(e))
+                    logger.error("callback_error", event_name=event, error_msg=str(e))
 
     async def check_once(self) -> List[CheckResult]:
         """执行一次检查

@@ -173,7 +173,9 @@ class PositionCheck(HealthCheck):
 
             # 计算总持仓价值
             total_value = sum(p.get("market_value", 0) for p in positions)
-            portfolio_value = sum(p.get("portfolio_value", total_value) for p in positions) or 1.0
+            # portfolio_value 应该取第一个持仓的组合价值，或者使用传入的总价值
+            portfolio_value = positions[0].get("portfolio_value", total_value) if positions else total_value
+            portfolio_value = portfolio_value or 1.0
 
             # 检查持仓数量
             if total_positions > self.max_positions:
