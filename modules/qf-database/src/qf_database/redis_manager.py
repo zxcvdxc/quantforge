@@ -1,18 +1,51 @@
-"""Redis缓存管理器 - 实时数据缓存"""
+"""Redis缓存管理器 - 实时数据缓存
+
+性能优化特性:
+- 优化的连接池配置
+- Pipeline批量操作支持
+- 连接池健康检查
+- 操作统计和监控
+"""
 import json
 import pickle
-from typing import Optional, Any, List, Dict, Union
-from datetime import datetime, timedelta
+import time
+import logging
+from typing import Optional, Any, List, Dict, Union, Tuple
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import redis
 from redis.client import Redis
+from redis.connection import ConnectionPool
+from redis.exceptions import RedisError, ConnectionError as RedisConnectionError, TimeoutError
 
 from .models import Tick, Kline
 
+logger = logging.getLogger(__name__)
+
 
 class RedisManager:
-    """Redis缓存管理器"""
+    """Redis缓存管理器 - 优化版
+    
+    连接池优化配置:
+    - max_connections: 最大连接数，默认100
+    - socket_timeout: 套接字超时，默认5.0秒
+    - socket_connect_timeout: 连接超时，默认5.0秒
+    - socket_keepalive: 保持连接活跃
+    - health_check_interval: 健康检查间隔，默认30秒
+    
+    性能特性:
+    - 连接池复用
+    - Pipeline批量操作
+    - 自动重连机制
+    - 操作统计
+    """
+    
+    # 默认连接池配置
+    DEFAULT_MAX_CONNECTIONS = 100
+    DEFAULT_SOCKET_TIMEOUT = 5.0
+    DEFAULT_SOCKET_CONNECT_TIMEOUT = 5.0
+    DEFAULT_HEALTH_CHECK_INTERVAL = 30
     
     # 键名前缀
     KEY_PREFIX_TICK = "tick:"
@@ -28,10 +61,16 @@ class RedisManager:
         port: int = 6379,
         db: int = 0,
         password: Optional[str] = None,
-        socket_timeout: float = 5.0,
-        socket_connect_timeout: float = 5.0,
-        max_connections: int = 50,
-        decode_responses: bool = False
+        # 连接池配置
+        max_connections: int = None,
+        socket_timeout: float = None,
+        socket_connect_timeout: float = None,
+        socket_keepalive: bool = True,
+        health_check_interval: int = None,
+        # 行为配置
+        decode_responses: bool = False,
+        retry_on_timeout: bool = True,
+        retry_on_error: List[type] = None
     ):
         """
         初始化Redis管理器
@@ -41,31 +80,58 @@ class RedisManager:
             port: 端口
             db: 数据库编号
             password: 密码
-            socket_timeout: 套接字超时
-            socket_connect_timeout: 连接超时
-            max_connections: 最大连接数
+            max_connections: 最大连接数 (默认100)
+            socket_timeout: 套接字超时秒数 (默认5.0)
+            socket_connect_timeout: 连接超时秒数 (默认5.0)
+            socket_keepalive: 是否保持连接活跃
+            health_check_interval: 健康检查间隔秒数 (默认30)
             decode_responses: 是否自动解码响应
+            retry_on_timeout: 超时时是否重试
+            retry_on_error: 错误类型列表，遇到时重试
         """
         self.host = host
         self.port = port
         self.db = db
         
-        # 创建连接池
-        self.pool = redis.ConnectionPool(
+        # 操作统计
+        self._stats = {
+            "total_ops": 0,
+            "failed_ops": 0,
+            "pipeline_ops": 0,
+            "cache_hits": 0,
+            "cache_misses": 0
+        }
+        
+        # 使用默认配置
+        max_connections = max_connections or self.DEFAULT_MAX_CONNECTIONS
+        socket_timeout = socket_timeout or self.DEFAULT_SOCKET_TIMEOUT
+        socket_connect_timeout = socket_connect_timeout or self.DEFAULT_SOCKET_CONNECT_TIMEOUT
+        health_check_interval = health_check_interval or self.DEFAULT_HEALTH_CHECK_INTERVAL
+        
+        # 创建连接池 - 优化配置
+        self.pool = ConnectionPool(
             host=host,
             port=port,
             db=db,
             password=password,
+            max_connections=max_connections,
             socket_timeout=socket_timeout,
             socket_connect_timeout=socket_connect_timeout,
-            max_connections=max_connections,
+            socket_keepalive=socket_keepalive,
+            health_check_interval=health_check_interval,
             decode_responses=decode_responses
         )
         
-        # 创建客户端
-        self.client: Redis = redis.Redis(connection_pool=self.pool)
+        # 创建客户端 - 使用连接池
+        self.client: Redis = redis.Redis(
+            connection_pool=self.pool,
+            retry_on_timeout=retry_on_timeout,
+            retry_on_error=retry_on_error or [RedisConnectionError, TimeoutError]
+        )
         
         self._connected = False
+        
+        logger.info(f"RedisManager initialized with max_connections={max_connections}")
     
     def connect(self) -> bool:
         """
@@ -75,25 +141,92 @@ class RedisManager:
             是否连接成功
         """
         try:
+            start_time = time.time()
             self.client.ping()
+            latency = time.time() - start_time
+            
             self._connected = True
+            logger.debug(f"Redis connection successful, latency={latency*1000:.2f}ms")
             return True
+            
+        except RedisConnectionError as e:
+            logger.error(f"Redis connection failed (ConnectionError): {e}")
+            self._connected = False
+            return False
+        except TimeoutError as e:
+            logger.error(f"Redis connection failed (Timeout): {e}")
+            self._connected = False
+            return False
         except Exception as e:
-            print(f"Redis连接失败: {e}")
+            logger.error(f"Redis connection failed: {e}")
             self._connected = False
             return False
     
     def disconnect(self) -> None:
-        """断开连接"""
-        self.pool.disconnect()
-        self._connected = False
+        """断开连接并释放连接池"""
+        try:
+            self.pool.disconnect()
+            logger.info("Redis connection pool disconnected")
+        except Exception as e:
+            logger.warning(f"Error during disconnect: {e}")
+        finally:
+            self._connected = False
     
     def ping(self) -> bool:
         """测试连接是否存活"""
         try:
             return self.client.ping()
-        except:
+        except Exception as e:
+            logger.warning(f"Redis ping failed: {e}")
             return False
+    
+    def health_check(self) -> Tuple[bool, float, Optional[str]]:
+        """
+        健康检查
+        
+        Returns:
+            (是否健康, 延迟毫秒, 错误信息)
+        """
+        try:
+            start_time = time.time()
+            self.client.ping()
+            latency = (time.time() - start_time) * 1000
+            return True, latency, None
+        except Exception as e:
+            return False, 0.0, str(e)
+    
+    def get_pool_status(self) -> Dict[str, Any]:
+        """
+        获取连接池状态
+        
+        Returns:
+            连接池状态字典
+        """
+        return {
+            "max_connections": self.pool.max_connections,
+            "in_use": len(self.pool._in_use_connections) if hasattr(self.pool, '_in_use_connections') else -1,
+            "available": len(self.pool._available_connections) if hasattr(self.pool, '_available_connections') else -1,
+        }
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """获取操作统计信息"""
+        stats = self._stats.copy()
+        total_cache_ops = stats["cache_hits"] + stats["cache_misses"]
+        stats["cache_hit_rate"] = (
+            stats["cache_hits"] / total_cache_ops * 100
+            if total_cache_ops > 0 else 0
+        )
+        return stats
+    
+    def reset_stats(self) -> None:
+        """重置统计信息"""
+        self._stats = {
+            "total_ops": 0,
+            "failed_ops": 0,
+            "pipeline_ops": 0,
+            "cache_hits": 0,
+            "cache_misses": 0
+        }
     
     # ==================== 基础操作 ====================
     
@@ -105,7 +238,7 @@ class RedisManager:
         serialize: str = "json"
     ) -> bool:
         """
-        设置键值
+        设置键值 - 优化版
         
         Args:
             key: 键名
@@ -116,6 +249,8 @@ class RedisManager:
         Returns:
             是否设置成功
         """
+        self._stats["total_ops"] += 1
+        
         try:
             if serialize == "json":
                 value = json.dumps(value, default=self._json_serializer)
@@ -128,8 +263,10 @@ class RedisManager:
                 self.client.set(key, value)
             
             return True
+            
         except Exception as e:
-            print(f"Redis设置失败: {e}")
+            self._stats["failed_ops"] += 1
+            logger.warning(f"Redis set failed for key {key}: {e}")
             return False
     
     def get(
@@ -139,7 +276,7 @@ class RedisManager:
         deserialize: str = "json"
     ) -> Any:
         """
-        获取键值
+        获取键值 - 优化版
         
         Args:
             key: 键名
@@ -149,11 +286,16 @@ class RedisManager:
         Returns:
             值或默认值
         """
+        self._stats["total_ops"] += 1
+        
         try:
             value = self.client.get(key)
             
             if value is None:
+                self._stats["cache_misses"] += 1
                 return default
+            
+            self._stats["cache_hits"] += 1
             
             if deserialize == "json":
                 return json.loads(value)
@@ -161,9 +303,104 @@ class RedisManager:
                 return pickle.loads(value)
             else:
                 return value
+                
         except Exception as e:
-            print(f"Redis获取失败: {e}")
+            self._stats["failed_ops"] += 1
+            logger.warning(f"Redis get failed for key {key}: {e}")
             return default
+    
+    def set_batch(
+        self,
+        items: Dict[str, Any],
+        ttl: Optional[int] = None,
+        serialize: str = "json"
+    ) -> bool:
+        """
+        批量设置键值 - 使用Pipeline优化
+        
+        Args:
+            items: 键值对字典
+            ttl: 过期时间(秒)
+            serialize: 序列化方式
+            
+        Returns:
+            是否设置成功
+        """
+        if not items:
+            return True
+        
+        self._stats["total_ops"] += len(items)
+        self._stats["pipeline_ops"] += 1
+        
+        try:
+            pipe = self.client.pipeline()
+            
+            for key, value in items.items():
+                if serialize == "json":
+                    value = json.dumps(value, default=self._json_serializer)
+                elif serialize == "pickle":
+                    value = pickle.dumps(value)
+                
+                if ttl:
+                    pipe.setex(key, ttl, value)
+                else:
+                    pipe.set(key, value)
+            
+            pipe.execute()
+            return True
+            
+        except Exception as e:
+            self._stats["failed_ops"] += len(items)
+            logger.warning(f"Redis set_batch failed: {e}")
+            return False
+    
+    def get_batch(
+        self,
+        keys: List[str],
+        deserialize: str = "json"
+    ) -> Dict[str, Any]:
+        """
+        批量获取键值 - 使用Pipeline优化
+        
+        Args:
+            keys: 键名列表
+            deserialize: 反序列化方式
+            
+        Returns:
+            键值对字典 (只返回存在的键)
+        """
+        if not keys:
+            return {}
+        
+        self._stats["total_ops"] += len(keys)
+        self._stats["pipeline_ops"] += 1
+        
+        try:
+            pipe = self.client.pipeline()
+            for key in keys:
+                pipe.get(key)
+            
+            results = pipe.execute()
+            
+            output = {}
+            for key, value in zip(keys, results):
+                if value is not None:
+                    self._stats["cache_hits"] += 1
+                    if deserialize == "json":
+                        output[key] = json.loads(value)
+                    elif deserialize == "pickle":
+                        output[key] = pickle.loads(value)
+                    else:
+                        output[key] = value
+                else:
+                    self._stats["cache_misses"] += 1
+            
+            return output
+            
+        except Exception as e:
+            self._stats["failed_ops"] += len(keys)
+            logger.warning(f"Redis get_batch failed: {e}")
+            return {}
     
     def delete(self, key: str) -> bool:
         """
@@ -175,12 +412,45 @@ class RedisManager:
         Returns:
             是否删除成功
         """
+        self._stats["total_ops"] += 1
+        
         try:
             self.client.delete(key)
             return True
         except Exception as e:
-            print(f"Redis删除失败: {e}")
+            self._stats["failed_ops"] += 1
+            logger.warning(f"Redis delete failed for key {key}: {e}")
             return False
+    
+    def delete_batch(self, keys: List[str]) -> int:
+        """
+        批量删除键 - 使用Pipeline优化
+        
+        Args:
+            keys: 键名列表
+            
+        Returns:
+            成功删除的键数量
+        """
+        if not keys:
+            return 0
+        
+        self._stats["total_ops"] += len(keys)
+        self._stats["pipeline_ops"] += 1
+        
+        try:
+            pipe = self.client.pipeline()
+            for key in keys:
+                pipe.delete(key)
+            
+            results = pipe.execute()
+            deleted_count = sum(results)
+            return deleted_count
+            
+        except Exception as e:
+            self._stats["failed_ops"] += len(keys)
+            logger.warning(f"Redis delete_batch failed: {e}")
+            return 0
     
     def exists(self, key: str) -> bool:
         """

@@ -845,9 +845,9 @@ class TestDatabaseManagerExtended:
     @patch.object(MySQLManager, '__init__', return_value=None)
     @patch.object(InfluxDBManager, '__init__', return_value=None)
     @patch.object(RedisManager, '__init__', return_value=None)
-    @patch.object(MySQLManager, 'connect', return_value=False)
-    @patch.object(InfluxDBManager, 'connect', return_value=False)
-    @patch.object(RedisManager, 'connect', return_value=False)
+    @patch.object(MySQLManager, 'health_check', return_value=(False, 0, "Connection refused"))
+    @patch.object(InfluxDBManager, 'health_check', return_value=(False, 0, "Connection refused"))
+    @patch.object(RedisManager, 'health_check', return_value=(False, 0, "Connection refused"))
     def test_check_health_unhealthy(self, mock_redis, mock_influx, mock_mysql, *args):
         """测试健康检查 - 全部不健康"""
         manager = DatabaseManager()
@@ -861,9 +861,9 @@ class TestDatabaseManagerExtended:
     @patch.object(MySQLManager, '__init__', return_value=None)
     @patch.object(InfluxDBManager, '__init__', return_value=None)
     @patch.object(RedisManager, '__init__', return_value=None)
-    @patch.object(MySQLManager, 'connect', return_value=True)
-    @patch.object(InfluxDBManager, 'connect', return_value=True)
-    @patch.object(RedisManager, 'connect', return_value=True)
+    @patch.object(MySQLManager, 'health_check', return_value=(True, 1.5, None))
+    @patch.object(InfluxDBManager, 'health_check', return_value=(True, 2.0, None))
+    @patch.object(RedisManager, 'health_check', return_value=(True, 0.5, None))
     def test_check_health_healthy(self, mock_redis, mock_influx, mock_mysql, *args):
         """测试健康检查 - 全部健康"""
         manager = DatabaseManager()
@@ -877,9 +877,9 @@ class TestDatabaseManagerExtended:
     @patch.object(MySQLManager, '__init__', return_value=None)
     @patch.object(InfluxDBManager, '__init__', return_value=None)
     @patch.object(RedisManager, '__init__', return_value=None)
-    @patch.object(MySQLManager, 'connect', return_value=True)
-    @patch.object(InfluxDBManager, 'connect', return_value=False)
-    @patch.object(RedisManager, 'connect', return_value=False)
+    @patch.object(MySQLManager, 'health_check', return_value=(True, 1.5, None))
+    @patch.object(InfluxDBManager, 'health_check', return_value=(False, 0, "Connection refused"))
+    @patch.object(RedisManager, 'health_check', return_value=(False, 0, "Connection refused"))
     def test_check_health_degraded(self, mock_redis, mock_influx, mock_mysql, *args):
         """测试健康检查 - 降级"""
         manager = DatabaseManager()

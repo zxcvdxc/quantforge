@@ -1,43 +1,69 @@
-"""数据库管理器 - 统一管理 MySQL + InfluxDB + Redis"""
-from typing import Optional, Dict, Any, List
-from datetime import datetime
-from dataclasses import dataclass
+"""数据库管理器 - 统一管理 MySQL + InfluxDB + Redis
+
+性能优化特性:
+- 统一连接池配置管理
+- 批量操作API
+- 健康检查和监控
+- 性能统计
+"""
+from typing import Optional, Dict, Any, List, Tuple
+from datetime import datetime, timezone
+from dataclasses import dataclass, field
+import time
+import logging
 
 from .mysql_manager import MySQLManager
 from .influxdb_manager import InfluxDBManager
 from .redis_manager import RedisManager
 from .models import Contract, Trade, Account, Kline, Tick
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class DatabaseConfig:
-    """数据库配置"""
+    """数据库配置 - 优化版"""
     # MySQL配置
     mysql_host: str = "localhost"
     mysql_port: int = 3306
     mysql_user: str = "root"
     mysql_password: str = ""
     mysql_database: str = "quantforge"
-    mysql_pool_size: int = 10
+    mysql_pool_size: int = 20
+    mysql_max_overflow: int = 30
+    mysql_pool_recycle: int = 3600
+    mysql_pool_timeout: int = 30
     
     # InfluxDB配置
     influxdb_url: str = "http://localhost:8086"
     influxdb_token: str = ""
     influxdb_org: str = "quantforge"
     influxdb_bucket: str = "market_data"
+    influxdb_batch_size: int = 5000
+    influxdb_flush_interval: int = 1000
+    influxdb_max_retries: int = 5
+    influxdb_write_mode: str = "batch"  # batch, sync, async
     
     # Redis配置
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_db: int = 0
     redis_password: Optional[str] = None
+    redis_max_connections: int = 100
+    redis_socket_timeout: float = 5.0
 
 
 class DatabaseManager:
     """
-    统一数据库管理器
+    统一数据库管理器 - 优化版
     
     整合MySQL、InfluxDB、Redis三大数据库，提供统一的量化交易数据管理接口
+    
+    优化特性:
+    - 优化的连接池配置
+    - 批量操作API
+    - 健康检查和监控
+    - 性能统计
     """
     
     def __init__(self, config: Optional[DatabaseConfig] = None):
@@ -49,29 +75,40 @@ class DatabaseManager:
         """
         self.config = config or DatabaseConfig()
         
-        # 初始化各管理器
+        # 初始化各管理器 - 使用优化配置
         self.mysql = MySQLManager(
             host=self.config.mysql_host,
             port=self.config.mysql_port,
             user=self.config.mysql_user,
             password=self.config.mysql_password,
             database=self.config.mysql_database,
-            pool_size=self.config.mysql_pool_size
+            pool_size=self.config.mysql_pool_size,
+            max_overflow=self.config.mysql_max_overflow,
+            pool_recycle=self.config.mysql_pool_recycle,
+            pool_timeout=self.config.mysql_pool_timeout
         )
         
         self.influxdb = InfluxDBManager(
             url=self.config.influxdb_url,
             token=self.config.influxdb_token,
             org=self.config.influxdb_org,
-            bucket=self.config.influxdb_bucket
+            bucket=self.config.influxdb_bucket,
+            batch_size=self.config.influxdb_batch_size,
+            flush_interval=self.config.influxdb_flush_interval,
+            max_retries=self.config.influxdb_max_retries,
+            write_mode=self.config.influxdb_write_mode
         )
         
         self.redis = RedisManager(
             host=self.config.redis_host,
             port=self.config.redis_port,
             db=self.config.redis_db,
-            password=self.config.redis_password
+            password=self.config.redis_password,
+            max_connections=self.config.redis_max_connections,
+            socket_timeout=self.config.redis_socket_timeout
         )
+        
+        logger.info("DatabaseManager initialized with optimized configuration")
     
     def connect_all(self) -> Dict[str, bool]:
         """
@@ -94,59 +131,87 @@ class DatabaseManager:
     
     def check_health(self) -> Dict[str, Any]:
         """
-        检查所有数据库健康状态
+        检查所有数据库健康状态 - 优化版
         
         Returns:
             健康状态字典
         """
         health = {
-            "mysql": {"connected": False, "latency_ms": 0},
-            "influxdb": {"connected": False, "latency_ms": 0},
-            "redis": {"connected": False, "latency_ms": 0},
-            "overall": "unhealthy"
+            "mysql": {"connected": False, "latency_ms": 0, "pool_status": {}},
+            "influxdb": {"connected": False, "latency_ms": 0, "write_stats": {}},
+            "redis": {"connected": False, "latency_ms": 0, "pool_status": {}},
+            "overall": "unhealthy",
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
-        
-        import time
         
         # 检查MySQL
         try:
-            start = time.time()
-            health["mysql"]["connected"] = self.mysql.connect()
-            health["mysql"]["latency_ms"] = round((time.time() - start) * 1000, 2)
+            connected, latency, error = self.mysql.health_check()
+            health["mysql"]["connected"] = connected
+            health["mysql"]["latency_ms"] = round(latency, 2)
+            health["mysql"]["pool_status"] = self.mysql.get_pool_status()
+            if error:
+                health["mysql"]["error"] = error
         except Exception as e:
             health["mysql"]["error"] = str(e)
         
         # 检查InfluxDB
         try:
-            start = time.time()
-            health["influxdb"]["connected"] = self.influxdb.connect()
-            health["influxdb"]["latency_ms"] = round((time.time() - start) * 1000, 2)
+            connected, latency, error = self.influxdb.health_check()
+            health["influxdb"]["connected"] = connected
+            health["influxdb"]["latency_ms"] = round(latency, 2)
+            health["influxdb"]["write_stats"] = self.influxdb.get_write_stats()
+            if error:
+                health["influxdb"]["error"] = error
         except Exception as e:
             health["influxdb"]["error"] = str(e)
         
         # 检查Redis
         try:
-            start = time.time()
-            health["redis"]["connected"] = self.redis.connect()
-            health["redis"]["latency_ms"] = round((time.time() - start) * 1000, 2)
+            connected, latency, error = self.redis.health_check()
+            health["redis"]["connected"] = connected
+            health["redis"]["latency_ms"] = round(latency, 2)
+            health["redis"]["pool_status"] = self.redis.get_pool_status()
+            health["redis"]["stats"] = self.redis.get_stats()
+            if error:
+                health["redis"]["error"] = error
         except Exception as e:
             health["redis"]["error"] = str(e)
         
         # 整体状态
-        if all([
+        connected_count = sum([
             health["mysql"]["connected"],
             health["influxdb"]["connected"],
             health["redis"]["connected"]
-        ]):
+        ])
+        
+        if connected_count == 3:
             health["overall"] = "healthy"
-        elif any([
-            health["mysql"]["connected"],
-            health["influxdb"]["connected"],
-            health["redis"]["connected"]
-        ]):
+        elif connected_count >= 1:
             health["overall"] = "degraded"
         
         return health
+    
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """
+        获取性能统计信息
+        
+        Returns:
+            性能统计字典
+        """
+        return {
+            "mysql": {
+                "pool_status": self.mysql.get_pool_status(),
+                "connection_stats": self.mysql.connection_stats
+            },
+            "influxdb": {
+                "write_stats": self.influxdb.get_write_stats()
+            },
+            "redis": {
+                "pool_status": self.redis.get_pool_status(),
+                "stats": self.redis.get_stats()
+            }
+        }
     
     # ==================== 快捷方法：合约管理 ====================
     

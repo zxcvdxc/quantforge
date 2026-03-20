@@ -1,18 +1,30 @@
-"""MySQL数据库管理器 - 使用 SQLAlchemy 2.0"""
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+"""MySQL数据库管理器 - 使用 SQLAlchemy 2.0
+
+性能优化特性:
+- 优化的连接池配置 (pool_size, max_overflow, pool_recycle)
+- 连接池预检和自动回收
+- 批量操作支持
+- 异步查询支持准备
+"""
+from typing import Optional, List, Dict, Any, Union, Tuple
+from datetime import datetime, timezone
 from decimal import Decimal
 from contextlib import contextmanager
+import time
+import logging
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, Numeric, 
-    Text, ForeignKey, Index, select, update, delete, and_, or_
+    Text, ForeignKey, Index, select, update, delete, and_, or_,
+    insert, func
 )
 from sqlalchemy.orm import declarative_base, Session, sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import QueuePool, NullPool
+from sqlalchemy.exc import SQLAlchemyError, OperationalError, IntegrityError
 
 from .models import Contract, Trade, Account
 
+logger = logging.getLogger(__name__)
 Base = declarative_base()
 
 
@@ -89,7 +101,29 @@ class AccountModel(Base):
 
 
 class MySQLManager:
-    """MySQL数据库管理器"""
+    """MySQL数据库管理器 - 优化版
+    
+    连接池优化配置:
+    - pool_size: 基础连接数，默认20
+    - max_overflow: 最大溢出连接数，默认30
+    - pool_recycle: 连接回收时间(秒)，默认3600
+    - pool_pre_ping: 连接前检测是否存活
+    - pool_timeout: 获取连接超时时间(秒)，默认30
+    - max_idle_time: 空闲连接最大存活时间(秒)，默认600
+    
+    性能特性:
+    - 连接池自动管理
+    - 批量插入优化
+    - 查询缓存准备
+    - 连接健康检查
+    """
+    
+    # 默认连接池配置
+    DEFAULT_POOL_SIZE = 20
+    DEFAULT_MAX_OVERFLOW = 30
+    DEFAULT_POOL_RECYCLE = 3600
+    DEFAULT_POOL_TIMEOUT = 30
+    DEFAULT_MAX_IDLE_TIME = 600
     
     def __init__(
         self,
@@ -98,9 +132,13 @@ class MySQLManager:
         user: str = "root",
         password: str = "",
         database: str = "quantforge",
-        pool_size: int = 10,
-        max_overflow: int = 20,
-        echo: bool = False
+        pool_size: int = None,
+        max_overflow: int = None,
+        pool_recycle: int = None,
+        pool_timeout: int = None,
+        max_idle_time: int = None,
+        echo: bool = False,
+        enable_pooling: bool = True
     ):
         """
         初始化MySQL管理器
@@ -111,73 +149,189 @@ class MySQLManager:
             user: 用户名
             password: 密码
             database: 数据库名
-            pool_size: 连接池大小
-            max_overflow: 最大溢出连接数
+            pool_size: 连接池大小 (默认20)
+            max_overflow: 最大溢出连接数 (默认30)
+            pool_recycle: 连接回收时间，秒 (默认3600)
+            pool_timeout: 获取连接超时时间，秒 (默认30)
+            max_idle_time: 空闲连接最大存活时间，秒 (默认600)
             echo: 是否输出SQL语句
+            enable_pooling: 是否启用连接池 (压力测试时可禁用)
         """
         self.host = host
         self.port = port
         self.database = database
+        self._connected = False
+        self._connection_stats = {
+            "created_at": None,
+            "query_count": 0,
+            "error_count": 0
+        }
+        
+        # 使用默认配置
+        pool_size = pool_size or self.DEFAULT_POOL_SIZE
+        max_overflow = max_overflow or self.DEFAULT_MAX_OVERFLOW
+        pool_recycle = pool_recycle or self.DEFAULT_POOL_RECYCLE
+        pool_timeout = pool_timeout or self.DEFAULT_POOL_TIMEOUT
+        max_idle_time = max_idle_time or self.DEFAULT_MAX_IDLE_TIME
         
         # 创建数据库引擎 - SQLAlchemy 2.0 语法
-        self.engine = create_engine(
-            f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}",
-            poolclass=QueuePool,
-            pool_size=pool_size,
-            max_overflow=max_overflow,
-            pool_pre_ping=True,  # 自动检测断开连接
-            pool_recycle=3600,   # 1小时后回收连接
-            echo=echo
-        )
+        connection_url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
+        
+        if enable_pooling:
+            self.engine = create_engine(
+                connection_url,
+                poolclass=QueuePool,
+                pool_size=pool_size,
+                max_overflow=max_overflow,
+                pool_pre_ping=True,  # 自动检测断开连接
+                pool_recycle=pool_recycle,   # 1小时后回收连接
+                pool_timeout=pool_timeout,   # 获取连接超时
+                pool_use_lifo=True,  # 使用LIFO，提高缓存命中率
+                echo=echo,
+                # 连接参数
+                connect_args={
+                    "connect_timeout": 10,
+                    "read_timeout": 30,
+                    "write_timeout": 30,
+                }
+            )
+        else:
+            # 禁用连接池，用于压力测试
+            self.engine = create_engine(
+                connection_url,
+                poolclass=NullPool,
+                echo=echo
+            )
         
         self.SessionLocal = sessionmaker(
             bind=self.engine,
             autocommit=False,
-            autoflush=False
+            autoflush=False,
+            expire_on_commit=False  # 提高性能，避免重复查询
         )
         
-        self._connected = False
+        logger.info(f"MySQLManager initialized with pool_size={pool_size}, max_overflow={max_overflow}")
     
     def connect(self) -> bool:
         """
-        测试数据库连接
+        测试数据库连接并获取连接池状态
         
         Returns:
             是否连接成功
         """
         try:
+            start_time = time.time()
             with self.engine.connect() as conn:
                 conn.execute(select(1))
+            
+            latency = time.time() - start_time
             self._connected = True
+            self._connection_stats["created_at"] = datetime.now(timezone.utc)
+            
+            logger.debug(f"MySQL connection successful, latency={latency*1000:.2f}ms")
             return True
+            
+        except OperationalError as e:
+            logger.error(f"MySQL connection failed (OperationalError): {e}")
+            self._connected = False
+            return False
+        except SQLAlchemyError as e:
+            logger.error(f"MySQL connection failed (SQLAlchemyError): {e}")
+            self._connected = False
+            return False
         except Exception as e:
-            print(f"MySQL连接失败: {e}")
+            logger.error(f"MySQL connection failed (Unexpected): {e}")
             self._connected = False
             return False
     
     def disconnect(self) -> None:
-        """断开连接"""
-        self.engine.dispose()
-        self._connected = False
+        """断开连接并清理连接池"""
+        try:
+            self.engine.dispose()
+            logger.info("MySQL connection pool disposed")
+        except Exception as e:
+            logger.warning(f"Error during disconnect: {e}")
+        finally:
+            self._connected = False
+    
+    def get_pool_status(self) -> Dict[str, Any]:
+        """
+        获取连接池状态
+        
+        Returns:
+            连接池状态字典
+        """
+        pool = self.engine.pool
+        return {
+            "size": pool.size() if hasattr(pool, 'size') else -1,
+            "checked_in": pool.checkedin() if hasattr(pool, 'checkedin') else -1,
+            "checked_out": pool.checkedout() if hasattr(pool, 'checkedout') else -1,
+            "overflow": pool.overflow() if hasattr(pool, 'overflow') else -1,
+        }
+    
+    def health_check(self) -> Tuple[bool, float, Optional[str]]:
+        """
+        健康检查
+        
+        Returns:
+            (是否健康, 延迟毫秒, 错误信息)
+        """
+        try:
+            start_time = time.time()
+            with self.engine.connect() as conn:
+                conn.execute(select(1))
+            latency = (time.time() - start_time) * 1000
+            return True, latency, None
+        except Exception as e:
+            return False, 0.0, str(e)
     
     def create_tables(self) -> None:
         """创建所有表"""
         Base.metadata.create_all(bind=self.engine)
+        logger.info("MySQL tables created")
     
     def drop_tables(self) -> None:
         """删除所有表"""
         Base.metadata.drop_all(bind=self.engine)
+        logger.warning("MySQL tables dropped")
     
     @contextmanager
     def session_scope(self):
-        """提供事务范围的session上下文管理器"""
+        """提供事务范围的session上下文管理器
+
+        自动处理提交和回滚，确保资源释放
+        """
         session = self.SessionLocal()
         try:
             yield session
             session.commit()
         except Exception as e:
             session.rollback()
-            raise e
+            logger.error(f"Session rollback due to error: {e}")
+            raise
+        finally:
+            session.close()
+    
+    @contextmanager
+    def batch_session(self, batch_size: int = 1000):
+        """批量操作会话上下文管理器
+        
+        Args:
+            batch_size: 每批提交的大小
+            
+        Yields:
+            BatchSession 对象
+        """
+        session = self.SessionLocal()
+        batcher = _BatchSession(session, batch_size)
+        try:
+            yield batcher
+            batcher.flush()  # 确保剩余数据提交
+            session.commit()
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"Batch session rollback: {e}")
+            raise
         finally:
             session.close()
     
@@ -737,3 +891,35 @@ class MySQLManager:
     def is_connected(self) -> bool:
         """是否已连接"""
         return self._connected
+    
+    @property
+    def connection_stats(self) -> Dict[str, Any]:
+        """获取连接统计信息"""
+        return self._connection_stats.copy()
+
+
+class _BatchSession:
+    """批量操作会话辅助类"""
+    
+    def __init__(self, session: Session, batch_size: int = 1000):
+        self.session = session
+        self.batch_size = batch_size
+        self._buffer: List[Any] = []
+    
+    def add(self, obj: Any) -> None:
+        """添加对象到缓冲区"""
+        self._buffer.append(obj)
+        if len(self._buffer) >= self.batch_size:
+            self.flush()
+    
+    def add_all(self, objs: List[Any]) -> None:
+        """批量添加对象"""
+        for obj in objs:
+            self.add(obj)
+    
+    def flush(self) -> None:
+        """刷新缓冲区到数据库"""
+        if self._buffer:
+            self.session.add_all(self._buffer)
+            self.session.flush()
+            self._buffer.clear()
