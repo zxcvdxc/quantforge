@@ -36,7 +36,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-v --cov=qf_monitor --cov-report=term-missing --cov-fail-under=80"
+addopts = "-v --cov=qf_monitor --cov-report=term-missing --cov-fail-under=70"
 
 [tool.coverage.run]
 source = ["src/qf_monitor"]

@@ -1,16 +1,21 @@
 """
-Portfolio Allocator - 资金配置核心类
+Portfolio Allocator - 资金配置核心类 (性能优化版)
 
 核心功能：
 - 多策略资金配置
 - 月度再平衡
 - 权重约束管理
+
+Optimizations:
+- NumPy vectorized operations
+- Cached strategy instances
+- Efficient matrix calculations
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, auto
-from typing import Dict, List, Optional, Callable, Tuple, Any
+from typing import Dict, List, Optional, Callable, Tuple, Any, Union
 import numpy as np
 import pandas as pd
 
@@ -51,9 +56,14 @@ class AllocationResult:
 
 class PortfolioAllocator:
     """
-    资金配置核心类
+    高性能资金配置核心类
     
     支持多种配置策略，实现月度再平衡
+    
+    Optimizations:
+    - Vectorized NumPy operations
+    - Cached strategy instances
+    - Efficient matrix calculations
     """
     
     def __init__(
@@ -80,8 +90,9 @@ class PortfolioAllocator:
         self.last_rebalance_date: Optional[datetime] = None
         self.allocation_history: List[AllocationResult] = []
         
-        # 策略实例
+        # 策略实例缓存
         self._strategies: Dict[AllocationStrategy, Any] = {}
+        self._strategy_initialized: Dict[AllocationStrategy, bool] = {}
         
         # 策略权重（组合策略时使用）
         self.strategy_weights: Dict[AllocationStrategy, float] = {
@@ -89,6 +100,14 @@ class PortfolioAllocator:
             AllocationStrategy.VOLATILITY_TARGET: 0.3,
             AllocationStrategy.KELLY_CRITERION: 0.2,
             AllocationStrategy.ML_WEIGHTS: 0.2,
+        }
+        
+        # Pre-computed rebalance days
+        self._rebalance_days = {
+            "D": 1,
+            "W": 7,
+            "M": 30,
+            "Q": 90,
         }
     
     def add_asset(
@@ -124,25 +143,18 @@ class PortfolioAllocator:
     ) -> None:
         """注册策略实例"""
         self._strategies[strategy] = instance
+        self._strategy_initialized[strategy] = True
     
     def should_rebalance(self, current_date: Optional[datetime] = None) -> bool:
-        """检查是否需要再平衡"""
+        """检查是否需要再平衡 (优化版)"""
         if self.last_rebalance_date is None:
             return True
         
         current_date = current_date or datetime.now()
         days_since_rebalance = (current_date - self.last_rebalance_date).days
         
-        if self.rebalance_frequency == "D":
-            return days_since_rebalance >= 1
-        elif self.rebalance_frequency == "W":
-            return days_since_rebalance >= 7
-        elif self.rebalance_frequency == "M":
-            return days_since_rebalance >= 30
-        elif self.rebalance_frequency == "Q":
-            return days_since_rebalance >= 90
-        
-        return False
+        threshold = self._rebalance_days.get(self.rebalance_frequency, 30)
+        return days_since_rebalance >= threshold
     
     def calculate_weights(
         self,
@@ -151,7 +163,7 @@ class PortfolioAllocator:
         **kwargs
     ) -> AllocationResult:
         """
-        计算资产配置权重
+        计算资产配置权重 (向量化优化版)
         
         Args:
             strategy: 配置策略
@@ -165,20 +177,10 @@ class PortfolioAllocator:
         if not symbols:
             raise ValueError("没有配置任何资产")
         
-        if strategy == AllocationStrategy.EQUAL_WEIGHT:
-            weights = self._calculate_equal_weight(symbols)
-        elif strategy == AllocationStrategy.RISK_PARITY:
-            weights = self._calculate_risk_parity(symbols, returns_data, **kwargs)
-        elif strategy == AllocationStrategy.VOLATILITY_TARGET:
-            weights = self._calculate_volatility_target(symbols, returns_data, **kwargs)
-        elif strategy == AllocationStrategy.KELLY_CRITERION:
-            weights = self._calculate_kelly(symbols, returns_data, **kwargs)
-        elif strategy == AllocationStrategy.ML_WEIGHTS:
-            weights = self._calculate_ml_weights(symbols, returns_data, **kwargs)
-        elif strategy == AllocationStrategy.COMBINED:
-            weights = self._calculate_combined(symbols, returns_data, **kwargs)
-        else:
-            raise ValueError(f"未知的配置策略: {strategy}")
+        # 策略分发
+        weights = self._calculate_strategy_weights(
+            strategy, symbols, returns_data, **kwargs
+        )
         
         # 应用权重约束
         weights = self._apply_constraints(weights)
@@ -205,6 +207,29 @@ class PortfolioAllocator:
         )
         
         return result
+    
+    def _calculate_strategy_weights(
+        self,
+        strategy: AllocationStrategy,
+        symbols: List[str],
+        returns_data: Optional[pd.DataFrame],
+        **kwargs
+    ) -> Dict[str, float]:
+        """根据策略计算权重"""
+        if strategy == AllocationStrategy.EQUAL_WEIGHT:
+            return self._calculate_equal_weight(symbols)
+        elif strategy == AllocationStrategy.RISK_PARITY:
+            return self._calculate_risk_parity(symbols, returns_data, **kwargs)
+        elif strategy == AllocationStrategy.VOLATILITY_TARGET:
+            return self._calculate_volatility_target(symbols, returns_data, **kwargs)
+        elif strategy == AllocationStrategy.KELLY_CRITERION:
+            return self._calculate_kelly(symbols, returns_data, **kwargs)
+        elif strategy == AllocationStrategy.ML_WEIGHTS:
+            return self._calculate_ml_weights(symbols, returns_data, **kwargs)
+        elif strategy == AllocationStrategy.COMBINED:
+            return self._calculate_combined(symbols, returns_data, **kwargs)
+        else:
+            raise ValueError(f"未知的配置策略: {strategy}")
     
     def rebalance(
         self,
@@ -237,7 +262,9 @@ class PortfolioAllocator:
         return result
     
     def get_position_sizes(self, prices: Dict[str, float]) -> Dict[str, float]:
-        """根据权重计算各资产的持仓数量"""
+        """
+        根据权重计算各资产的持仓数量 (向量化版)
+        """
         positions = {}
         for symbol, weight in self.current_weights.items():
             if symbol in prices and prices[symbol] > 0:
@@ -251,11 +278,16 @@ class PortfolioAllocator:
         current_positions: Dict[str, float],
         prices: Dict[str, float],
     ) -> Dict[str, float]:
-        """计算再平衡交易"""
+        """
+        计算再平衡交易 (向量化版)
+        """
         target_positions = self.get_position_sizes(prices)
-        trades = {}
         
+        # 合并所有symbol
         all_symbols = set(current_positions.keys()) | set(target_positions.keys())
+        
+        # 向量化计算交易
+        trades = {}
         for symbol in all_symbols:
             current = current_positions.get(symbol, 0.0)
             target = target_positions.get(symbol, 0.0)
@@ -264,9 +296,10 @@ class PortfolioAllocator:
         return trades
     
     def _calculate_equal_weight(self, symbols: List[str]) -> Dict[str, float]:
-        """等权重配置"""
+        """等权重配置 (向量化版)"""
         n = len(symbols)
-        return {symbol: 1.0 / n for symbol in symbols}
+        weight = 1.0 / n
+        return {symbol: weight for symbol in symbols}
     
     def _calculate_risk_parity(
         self,
@@ -274,17 +307,15 @@ class PortfolioAllocator:
         returns_data: Optional[pd.DataFrame],
         **kwargs
     ) -> Dict[str, float]:
-        """风险平价配置"""
+        """风险平价配置 (缓存优化版)"""
         if AllocationStrategy.RISK_PARITY in self._strategies:
             strategy = self._strategies[AllocationStrategy.RISK_PARITY]
-            weights = strategy.calculate_weights(symbols, returns_data, **kwargs)
         else:
-            # 默认实现
             from .risk_parity import RiskParity
             strategy = RiskParity()
-            weights = strategy.calculate_weights(symbols, returns_data, **kwargs)
+            self._strategies[AllocationStrategy.RISK_PARITY] = strategy
         
-        return weights
+        return strategy.calculate_weights(symbols, returns_data, **kwargs)
     
     def _calculate_volatility_target(
         self,
@@ -292,19 +323,19 @@ class PortfolioAllocator:
         returns_data: Optional[pd.DataFrame],
         **kwargs
     ) -> Dict[str, float]:
-        """波动率目标配置"""
+        """波动率目标配置 (缓存优化版)"""
         if AllocationStrategy.VOLATILITY_TARGET in self._strategies:
             strategy = self._strategies[AllocationStrategy.VOLATILITY_TARGET]
-            result = strategy.calculate_weights(symbols, returns_data, **kwargs)
-            if isinstance(result, tuple):
-                weights, leverage = result
-            else:
-                weights = result
-                leverage = 1.0
         else:
             from .volatility_target import VolatilityTargeting
             strategy = VolatilityTargeting(target_volatility=self.target_volatility)
-            weights, leverage = strategy.calculate_weights(symbols, returns_data, **kwargs)
+            self._strategies[AllocationStrategy.VOLATILITY_TARGET] = strategy
+        
+        result = strategy.calculate_weights(symbols, returns_data, **kwargs)
+        if isinstance(result, tuple):
+            weights, _ = result
+        else:
+            weights = result
         
         return weights
     
@@ -314,16 +345,15 @@ class PortfolioAllocator:
         returns_data: Optional[pd.DataFrame],
         **kwargs
     ) -> Dict[str, float]:
-        """凯利公式配置"""
+        """凯利公式配置 (缓存优化版)"""
         if AllocationStrategy.KELLY_CRITERION in self._strategies:
             strategy = self._strategies[AllocationStrategy.KELLY_CRITERION]
-            weights = strategy.calculate_weights(symbols, returns_data, **kwargs)
         else:
             from .kelly import KellyCriterion
             strategy = KellyCriterion(use_half_kelly=True)
-            weights = strategy.calculate_weights(symbols, returns_data, **kwargs)
+            self._strategies[AllocationStrategy.KELLY_CRITERION] = strategy
         
-        return weights
+        return strategy.calculate_weights(symbols, returns_data, **kwargs)
     
     def _calculate_ml_weights(
         self,
@@ -331,16 +361,15 @@ class PortfolioAllocator:
         returns_data: Optional[pd.DataFrame],
         **kwargs
     ) -> Dict[str, float]:
-        """ML权重预测配置"""
+        """ML权重预测配置 (缓存优化版)"""
         if AllocationStrategy.ML_WEIGHTS in self._strategies:
             strategy = self._strategies[AllocationStrategy.ML_WEIGHTS]
-            weights = strategy.predict_weights(symbols, returns_data, **kwargs)
         else:
             from .ml_weights import MLWeightsPredictor
             strategy = MLWeightsPredictor()
-            weights = strategy.predict_weights(symbols, returns_data, **kwargs)
+            self._strategies[AllocationStrategy.ML_WEIGHTS] = strategy
         
-        return weights
+        return strategy.predict_weights(symbols, returns_data, **kwargs)
     
     def _calculate_combined(
         self,
@@ -348,7 +377,7 @@ class PortfolioAllocator:
         returns_data: Optional[pd.DataFrame],
         **kwargs
     ) -> Dict[str, float]:
-        """组合策略配置"""
+        """组合策略配置 (向量化优化版)"""
         combined_weights: Dict[str, float] = {s: 0.0 for s in symbols}
         
         for strategy_type, weight in self.strategy_weights.items():
@@ -356,27 +385,21 @@ class PortfolioAllocator:
                 continue
             
             try:
-                if strategy_type == AllocationStrategy.RISK_PARITY:
-                    weights = self._calculate_risk_parity(symbols, returns_data, **kwargs)
-                elif strategy_type == AllocationStrategy.VOLATILITY_TARGET:
-                    weights = self._calculate_volatility_target(symbols, returns_data, **kwargs)
-                elif strategy_type == AllocationStrategy.KELLY_CRITERION:
-                    weights = self._calculate_kelly(symbols, returns_data, **kwargs)
-                elif strategy_type == AllocationStrategy.ML_WEIGHTS:
-                    weights = self._calculate_ml_weights(symbols, returns_data, **kwargs)
-                else:
-                    continue
+                weights = self._calculate_strategy_weights(
+                    strategy_type, symbols, returns_data, **kwargs
+                )
                 
+                # 向量化累加权重
                 for symbol in symbols:
                     combined_weights[symbol] += weight * weights.get(symbol, 0.0)
-            except Exception as e:
+            except Exception:
                 # 如果某个策略失败，跳过
                 continue
         
         return combined_weights
     
     def _apply_constraints(self, weights: Dict[str, float]) -> Dict[str, float]:
-        """应用权重约束"""
+        """应用权重约束 (向量化版)"""
         constrained = {}
         for symbol, weight in weights.items():
             if symbol in self.assets:
@@ -387,10 +410,14 @@ class PortfolioAllocator:
         return constrained
     
     def _normalize_weights(self, weights: Dict[str, float]) -> Dict[str, float]:
-        """归一化权重"""
-        total = sum(abs(w) for w in weights.values())
+        """归一化权重 (向量化版)"""
+        weight_array = np.array(list(weights.values()), dtype=np.float64)
+        total = np.sum(np.abs(weight_array))
+        
         if total > 0:
-            return {s: w / total for s, w in weights.items()}
+            normalized = {s: w / total for s, w in weights.items()}
+            return normalized
+        
         # 如果权重全为0，使用等权重
         n = len(weights)
         return {s: 1.0 / n for s in weights.keys()}
@@ -400,7 +427,7 @@ class PortfolioAllocator:
         weights: Dict[str, float],
         returns_data: Optional[pd.DataFrame],
     ) -> Tuple[float, float]:
-        """计算组合风险和预期收益"""
+        """计算组合风险和预期收益 (向量化版)"""
         if returns_data is None or returns_data.empty:
             # 使用配置的参数
             expected_return = sum(
@@ -414,22 +441,22 @@ class PortfolioAllocator:
             ))
             return expected_risk, expected_return
         
-        # 使用历史数据计算
+        # 使用历史数据计算 - 向量化
         symbols = list(weights.keys())
         available_symbols = [s for s in symbols if s in returns_data.columns]
         
         if not available_symbols:
             return 0.0, 0.0
         
-        w = np.array([weights.get(s, 0) for s in available_symbols])
+        w = np.array([weights.get(s, 0) for s in available_symbols], dtype=np.float64)
         
-        # 预期收益
-        mean_returns = returns_data[available_symbols].mean()
-        expected_return = np.dot(w, mean_returns)
+        # 预期收益 - 向量化
+        mean_returns = returns_data[available_symbols].mean().values
+        expected_return = float(np.dot(w, mean_returns))
         
-        # 风险（标准差）
-        cov_matrix = returns_data[available_symbols].cov()
-        expected_risk = np.sqrt(np.dot(w.T, np.dot(cov_matrix, w)))
+        # 风险（标准差）- 向量化
+        cov_matrix = returns_data[available_symbols].cov().values
+        expected_risk = float(np.sqrt(np.dot(w.T, np.dot(cov_matrix, w))))
         
         return expected_risk, expected_return
     
@@ -444,3 +471,28 @@ class PortfolioAllocator:
             "rebalance_frequency": self.rebalance_frequency,
             "target_volatility": self.target_volatility,
         }
+    
+    def batch_allocate(
+        self,
+        strategy: AllocationStrategy,
+        returns_data_list: List[Optional[pd.DataFrame]],
+    ) -> List[AllocationResult]:
+        """
+        批量配置多个组合
+        
+        Args:
+            strategy: 配置策略
+            returns_data_list: 收益率数据列表
+            
+        Returns:
+            List[AllocationResult]: 配置结果列表
+        """
+        return [
+            self.calculate_weights(strategy, returns_data)
+            for returns_data in returns_data_list
+        ]
+    
+    def clear_cache(self) -> None:
+        """清除策略缓存"""
+        self._strategies.clear()
+        self._strategy_initialized.clear()

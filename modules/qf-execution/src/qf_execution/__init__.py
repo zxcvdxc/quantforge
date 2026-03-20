@@ -1,7 +1,24 @@
 """
 QuantForge Execution Module - Order Management and Smart Routing
+
+高性能交易执行模块，提供订单管理、智能路由、订单拆分、批量处理等功能。
 """
 
+from .batch_processor import (
+    BatchConfig,
+    BatchOrderProcessor,
+    BatchResult,
+    OrderRateLimiter,
+    PriorityOrder,
+)
+from .connection_pool import (
+    AsyncTaskPool,
+    ConnectionConfig,
+    ConnectionPool,
+    ConnectionState,
+    ConnectionStats,
+    PooledConnection,
+)
 from .engine import ExecutionConfig, ExecutionEngine, OrderGateway
 from .models import (
     AccountType,
@@ -34,7 +51,7 @@ from .splitter import (
     VWAPOrder,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     # Engine
     "ExecutionEngine",
@@ -69,4 +86,17 @@ __all__ = [
     "VWAPOrder",
     "EqualSplitter",
     "SplitConfig",
+    # Connection Pool
+    "ConnectionPool",
+    "ConnectionConfig",
+    "PooledConnection",
+    "ConnectionState",
+    "ConnectionStats",
+    "AsyncTaskPool",
+    # Batch Processor
+    "BatchOrderProcessor",
+    "BatchConfig",
+    "BatchResult",
+    "PriorityOrder",
+    "OrderRateLimiter",
 ]

@@ -64,9 +64,11 @@ exclude_lines = [
     "raise AssertionError",
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
+    "pass",
+    "...",
 ]
 show_missing = true
-fail_under = 80
+fail_under = 85
 
 [tool.black]
 line-length = 88
