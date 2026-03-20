@@ -10,6 +10,9 @@ from .encryption import (
     encrypt_config,
     decrypt_config,
     get_master_key,
+    generate_master_key,
+    save_master_key,
+    initialize_security,
     rotate_key,
 )
 
@@ -20,6 +23,11 @@ from .masking import (
     mask_password,
     mask_connection_string,
     mask_amount,
+    mask_string,
+    mask_dict_values,
+    install_log_masker,
+    create_masked_logger,
+    MaskingConfig,
 )
 
 from .access_control import (
@@ -30,13 +38,19 @@ from .access_control import (
     IPWhitelist,
     require_permission,
     require_role,
+    User,
+    APIKey,
 )
 
 from .audit import (
     AuditLogger,
     AuditEvent,
     AuditEventType,
+    AuditLevel,
     audit_log,
+    audit_log_event,
+    init_audit_logger,
+    get_audit_logger,
 )
 
 from .exceptions import (
@@ -44,6 +58,7 @@ from .exceptions import (
     EncryptionError,
     DecryptionError,
     AccessDeniedError,
+    PermissionDeniedError,
     InvalidTokenError,
     KeyRotationError,
 )
@@ -58,6 +73,9 @@ __all__ = [
     "encrypt_config",
     "decrypt_config",
     "get_master_key",
+    "generate_master_key",
+    "save_master_key",
+    "initialize_security",
     "rotate_key",
     # Masking
     "LogMasker",
@@ -66,6 +84,11 @@ __all__ = [
     "mask_password",
     "mask_connection_string",
     "mask_amount",
+    "mask_string",
+    "mask_dict_values",
+    "install_log_masker",
+    "create_masked_logger",
+    "MaskingConfig",
     # Access Control
     "RBACManager",
     "Permission",
@@ -74,16 +97,23 @@ __all__ = [
     "IPWhitelist",
     "require_permission",
     "require_role",
+    "User",
+    "APIKey",
     # Audit
     "AuditLogger",
     "AuditEvent",
     "AuditEventType",
+    "AuditLevel",
     "audit_log",
+    "audit_log_event",
+    "init_audit_logger",
+    "get_audit_logger",
     # Exceptions
     "SecurityError",
     "EncryptionError",
     "DecryptionError",
     "AccessDeniedError",
+    "PermissionDeniedError",
     "InvalidTokenError",
     "KeyRotationError",
 ]

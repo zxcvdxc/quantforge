@@ -120,8 +120,8 @@ class APIKey:
     permission: APIKeyPermission         # 权限级别
     role: Role                           # 关联角色
     created_at: datetime                 # 创建时间
-    expires_at: Optional[datetime]       # 过期时间
-    last_used_at: Optional[datetime]     # 最后使用时间
+    expires_at: Optional[datetime] = None       # 过期时间
+    last_used_at: Optional[datetime] = None     # 最后使用时间
     usage_count: int = 0                 # 使用次数
     is_active: bool = True               # 是否激活
     allowed_ips: Optional[List[str]] = None  # 允许的IP列表
