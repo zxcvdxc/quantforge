@@ -919,3 +919,207 @@ class TestIntegration:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# =============================================================================
+# 新增优化功能测试
+# =============================================================================
+
+class TestSignalCache:
+    """测试信号缓存功能"""
+
+    def test_signal_cache_get_set(self):
+        """测试缓存基本操作"""
+        from qf_backtest.engine import SignalCache
+
+        cache = SignalCache(max_size=100)
+
+        # 测试获取不存在的键
+        assert cache.get("nonexistent") is None
+
+        # 测试设置和获取
+        cache.set("key1", "value1")
+        assert cache.get("key1") == "value1"
+
+    def test_signal_cache_size_limit(self):
+        """测试缓存大小限制"""
+        from qf_backtest.engine import SignalCache
+
+        cache = SignalCache(max_size=3)
+        cache.set("k1", "v1")
+        cache.set("k2", "v2")
+        cache.set("k3", "v3")
+        cache.set("k4", "v4")  # 应该触发清理
+
+        # 清除后应该还能正常工作
+        cache.set("k5", "v5")
+        assert cache.get("k5") == "v5"
+
+    def test_signal_cache_clear(self):
+        """测试缓存清除"""
+        from qf_backtest.engine import SignalCache
+
+        cache = SignalCache()
+        cache.set("key", "value")
+        cache.clear()
+
+        assert cache.get("key") is None
+
+
+class TestOptimizedEngineFeatures:
+    """测试优化后的引擎功能"""
+
+    def test_equity_array(self, engine, sample_market_data, simple_strategy):
+        """测试获取Equity数组"""
+        engine.run(sample_market_data, simple_strategy)
+
+        equity_array = engine.get_equity_array()
+        assert len(equity_array) > 0
+        assert isinstance(equity_array, np.ndarray)
+
+    def test_position_summary(self, engine, sample_market_data, simple_strategy):
+        """测试仓位摘要"""
+        engine.run(sample_market_data, simple_strategy)
+
+        summary = engine.get_position_summary()
+        # 可能有持仓也可能没有
+        assert isinstance(summary, pd.DataFrame)
+
+    def test_empty_position_summary(self, engine):
+        """测试空仓位的摘要"""
+        summary = engine.get_position_summary()
+        assert summary.empty
+
+    def test_enable_caching(self, sample_market_data, simple_strategy):
+        """测试启用缓存的引擎"""
+        engine = BacktestEngine(initial_capital=100000.0, enable_caching=True)
+        engine.run(sample_market_data, simple_strategy)
+
+        # 使用缓存功能
+        cached = engine.get_cached_signal("test")
+        assert cached is None
+
+        engine.cache_signal("test", "value")
+        assert engine.get_cached_signal("test") == "value"
+
+    def test_engine_reset(self, engine, sample_market_data, simple_strategy):
+        """测试引擎重置"""
+        engine.run(sample_market_data, simple_strategy)
+        assert len(engine.get_equity_curve()) > 0
+
+        engine.reset()
+        assert len(engine.get_equity_curve()) == 0
+        assert engine.current_cash == engine.initial_capital
+
+
+class TestMarketDataEvent:
+    """测试市场数据事件"""
+
+    def test_typical_price(self):
+        """测试典型价格"""
+        event = MarketDataEvent(
+            timestamp=datetime.now(),
+            symbol="AAPL",
+            open=100.0,
+            high=110.0,
+            low=90.0,
+            close=100.0,
+            volume=1000.0
+        )
+        assert event.typical_price == 100.0
+
+    def test_price_range(self):
+        """测试价格区间"""
+        event = MarketDataEvent(
+            timestamp=datetime.now(),
+            symbol="AAPL",
+            open=100.0,
+            high=110.0,
+            low=90.0,
+            close=100.0,
+            volume=1000.0
+        )
+        assert event.price_range == 20.0
+
+    def test_price_property(self):
+        """测试price属性"""
+        event = MarketDataEvent(
+            timestamp=datetime.now(),
+            symbol="AAPL",
+            open=100.0,
+            high=110.0,
+            low=90.0,
+            close=105.0,
+            volume=1000.0
+        )
+        assert event.price == 105.0
+
+
+class TestPositionProperties:
+    """测试持仓属性"""
+
+    def test_position_market_value(self):
+        """测试持仓市值"""
+        pos = Position(symbol="AAPL", quantity=100, avg_price=100.0)
+        assert pos.market_value == 10000.0
+
+    def test_position_unrealized_pnl(self):
+        """测试未实现盈亏"""
+        pos = Position(symbol="AAPL", quantity=100, avg_price=100.0)
+
+        # 价格上涨
+        pnl = pos.unrealized_pnl(110.0)
+        assert pnl == 1000.0
+
+        # 价格下跌
+        pnl = pos.unrealized_pnl(90.0)
+        assert pnl == -1000.0
+
+    def test_position_is_flat(self):
+        """测试是否空仓"""
+        pos = Position(symbol="AAPL", quantity=0, avg_price=0)
+        assert pos.is_flat is True
+        assert pos.is_long is False
+        assert pos.is_short is False
+
+
+class TestAccountProperties:
+    """测试账户属性"""
+
+    def test_account_buying_power(self):
+        """测试购买力"""
+        account = Account(initial_capital=100000.0, cash=50000.0)
+        assert account.buying_power() == 50000.0
+
+
+class TestEmptyDataFrames:
+    """测试空数据情况"""
+
+    def test_empty_trades(self, engine):
+        """测试空交易记录"""
+        trades = engine.get_trades()
+        assert trades.empty
+
+    def test_empty_equity_curve(self, engine):
+        """测试空权益曲线"""
+        curve = engine.get_equity_curve()
+        assert curve.empty
+
+
+class TestOrderProperties:
+    """测试订单属性"""
+
+    def test_order_creation(self):
+        """测试订单创建"""
+        order = Order(
+            id="ORD001",
+            timestamp=datetime.now(),
+            symbol="AAPL",
+            side=OrderSide.BUY,
+            quantity=100,
+            order_type=OrderType.MARKET,
+            status=OrderStatus.PENDING
+        )
+        assert order.symbol == "AAPL"
+        assert order.status == OrderStatus.PENDING
+
