@@ -64,21 +64,14 @@ class ChaosEngine:
             result = unreliable_operation()
     """
     
-    _instance = None
-    
-    def __new__(cls, *args, **kwargs):
-        """单例模式"""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-    
     def __init__(self, config: Optional[ChaosConfig] = None, **kwargs):
-        if hasattr(self, '_initialized'):
-            return
-        self._initialized = True
-        
         self.config = config or ChaosConfig()
         self._enabled = self.config.enabled
+        
+        # 应用kwargs覆盖
+        for key, value in kwargs.items():
+            if hasattr(self.config, key):
+                setattr(self.config, key, value)
         
         # 统计
         self._stats = {

@@ -8,6 +8,7 @@ import logging
 import threading
 from enum import Enum, auto
 from typing import Callable, Dict, List, Optional, Any, Union
+from functools import wraps
 from dataclasses import dataclass, field
 from datetime import datetime
 from collections import deque
@@ -81,11 +82,12 @@ class HealthChecker:
     
     def __new__(cls, *args, **kwargs):
         """单例模式"""
-        if cls._instance is None:
+        if kwargs.pop('_singleton', True):
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
-        return cls._instance
+                return cls._instance
+        return super().__new__(cls)
     
     def __init__(
         self,

@@ -74,7 +74,8 @@ class TestRetryManager:
         config = RetryConfig(
             strategy=RetryStrategy.EXPONENTIAL,
             base_delay=1.0,
-            exponential_base=2.0
+            exponential_base=2.0,
+            jitter=False  # 禁用抖动
         )
         manager = RetryManager(config)
         
@@ -86,7 +87,8 @@ class TestRetryManager:
         """测试线性延迟"""
         config = RetryConfig(
             strategy=RetryStrategy.LINEAR,
-            base_delay=1.0
+            base_delay=1.0,
+            jitter=False  # 禁用抖动
         )
         manager = RetryManager(config)
         

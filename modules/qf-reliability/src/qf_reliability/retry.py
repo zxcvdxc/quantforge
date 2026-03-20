@@ -71,6 +71,10 @@ class RetryManager:
             if hasattr(self.config, key):
                 setattr(self.config, key, value)
         
+        # 确保 retry_on_exceptions 是元组
+        if isinstance(self.config.retry_on_exceptions, list):
+            self.config.retry_on_exceptions = tuple(self.config.retry_on_exceptions)
+        
         # 统计
         self._stats = {
             "total_attempts": 0,
