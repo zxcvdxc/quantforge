@@ -1,49 +1,140 @@
 version: '3.8'
 
 services:
+  # MySQL 数据库
   mysql:
     image: mysql:8.0
+    container_name: qf-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: quantforge123
-      MYSQL_DATABASE: quantforge
-      MYSQL_USER: quant
-      MYSQL_PASSWORD: quant123
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-quantforge_root_123}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-quantforge}
+      MYSQL_USER: ${MYSQL_USER:-quant}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-quant_123}
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./database/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quantforge-network
 
+  # InfluxDB 时序数据库
   influxdb:
     image: influxdb:2.7
+    container_name: qf-influxdb
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_USERNAME: admin
-      DOCKER_INFLUXDB_INIT_PASSWORD: quantforge123
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_ADMIN_PASSWORD:-admin123}
       DOCKER_INFLUXDB_INIT_ORG: quantforge
       DOCKER_INFLUXDB_INIT_BUCKET: market_data
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_ADMIN_TOKEN:-quantforge_token}
     ports:
       - "8086:8086"
     volumes:
       - influxdb_data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quantforge-network
 
+  # Redis 缓存
   redis:
     image: redis:7-alpine
+    container_name: qf-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quantforge-network
 
+  # Grafana 监控
   grafana:
     image: grafana/grafana:latest
+    container_name: qf-grafana
     ports:
       - "3000:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - influxdb
+    networks:
+      - quantforge-network
+
+  # QuantForge 交易服务 (OKX)
+  quantforge-trading:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: qf-trading
+    environment:
+      # OKX API配置 (从.env文件读取)
+      - OKX_API_KEY=${OKX_API_KEY}
+      - OKX_API_SECRET=${OKX_API_SECRET}
+      - OKX_PASSPHRASE=${OKX_PASSPHRASE}
+      - OKX_SERVER=${OKX_SERVER:-TEST}
+      
+      # 数据库配置
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-quantforge}
+      - MYSQL_USER=${MYSQL_USER:-quant}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-quant_123}
+      
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_ADMIN_TOKEN:-quantforge_token}
+      - INFLUXDB_ORG=quantforge
+      - INFLUXDB_BUCKET=market_data
+      
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      
+      # 系统配置
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./config:/app/config
+    depends_on:
+      mysql:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quantforge-network
+    restart: unless-stopped
+    command: python3 examples/okx_basis_arbitrage.py
 
 volumes:
   mysql_data:
   influxdb_data:
   redis_data:
   grafana_data:
+
+networks:
+  quantforge-network:
+    driver: bridge
